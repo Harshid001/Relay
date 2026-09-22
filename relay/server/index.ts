@@ -94,6 +94,20 @@ const ALLOWED_HOSTNAMES = new Set([
 ]);
 const ALLOW_ALL_HOSTS = ALLOWED_HOSTNAMES.has('*');
 
+/** Exact names plus suffix wildcards like "*.vercel.app" (any subdomain). */
+function hostAllowed(hostname: string): boolean {
+  if (ALLOW_ALL_HOSTS) return true;
+  for (const entry of ALLOWED_HOSTNAMES) {
+    if (entry.startsWith('*.')) {
+      const suffix = entry.slice(1); // '.vercel.app'
+      if (hostname.endsWith(suffix) && hostname.length > suffix.length) return true;
+    } else if (hostname === entry) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /* ------------------------------------------------------------------ *
  * App + middleware
  * ------------------------------------------------------------------ */
@@ -133,7 +147,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (hostHeader) {
     const match = hostHeader.match(/^(\[[^\]]+\]|[^:]+)/);
     const hostname = (match ? match[1] : hostHeader).toLowerCase();
-    if (!ALLOW_ALL_HOSTS && !ALLOWED_HOSTNAMES.has(hostname)) {
+    if (!hostAllowed(hostname)) {
       res.status(403).json({ error: 'Forbidden host' });
       return;
     }
@@ -152,7 +166,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       res.status(403).json({ error: 'Forbidden origin' });
       return;
     }
-    if (!ALLOW_ALL_HOSTS && !ALLOWED_HOSTNAMES.has(originHost)) {
+    if (!hostAllowed(originHost)) {
       res.status(403).json({ error: 'Forbidden origin' });
       return;
     }
@@ -1035,6 +1049,27 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
  * Startup
  * ------------------------------------------------------------------ */
 
+/**
+ * Serverless entrypoint (api/index.ts): connect, seed and bootstrap on the
+ * first request of each warm instance. Memoized so concurrent cold-start
+ * invocations share one init; a failure clears the memo so the next request
+ * retries instead of caching the error forever.
+ */
+let readyPromise: Promise<void> | null = null;
+
+export function ensureReady(): Promise<void> {
+  readyPromise ??= (async () => {
+    await store.connectToDatabase();
+    await store.seedDatabase();
+    await auth.initAuthCollections(store.getDb());
+    await auth.bootstrapAdminFromEnv();
+  })().catch((error: unknown) => {
+    readyPromise = null;
+    throw error;
+  });
+  return readyPromise;
+}
+
 export async function startServer(port: number = PORT, host: string = HOST) {
   await store.connectToDatabase();
   await store.seedDatabase();
@@ -1073,7 +1108,9 @@ function isMainModule(): boolean {
   return resolvedEntry === self || resolvedEntry === self.replace(/\.ts$/, '.js');
 }
 
-if (isMainModule() && process.env.RELAY_NO_LISTEN !== '1') {
+// Serverless runtimes (Vercel exports VERCEL=1) drive this module through
+// api/index.ts — ensureReady() + the app per request, never app.listen().
+if (isMainModule() && process.env.RELAY_NO_LISTEN !== '1' && !process.env.VERCEL) {
   startServer().catch((error) => {
     console.error('[relay] failed to start:', error);
     process.exit(1);

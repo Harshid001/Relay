@@ -205,12 +205,16 @@ test('host/origin guard: loopback default, ALLOWED_HOSTS opens a domain, * disab
   assert.equal(await rawGet(`${base}/api/health`, 'relay.example'), 403);
   assert.equal((await req('/api/health', undefined, {})).status, 200);
 
-  const configured = await launch({ ALLOWED_HOSTS: 'relay.example' });
+  const configured = await launch({ ALLOWED_HOSTS: 'relay.example, *.vercel.app' });
   try {
     base = configured.url;
     assert.equal(await rawGet(`${base}/api/health`, 'relay.example'), 200);
     // Host is matched by hostname, ignoring the port.
     assert.equal(await rawGet(`${base}/api/health`, 'relay.example:8443'), 200);
+    // Suffix wildcards match any subdomain but not lookalikes or the bare domain.
+    assert.equal(await rawGet(`${base}/api/health`, 'relay-team.vercel.app'), 200);
+    assert.equal(await rawGet(`${base}/api/health`, 'xvercel.app'), 403);
+    assert.equal(await rawGet(`${base}/api/health`, 'vercel.app'), 403);
     // Origins from allowed hosts may write; strangers still cannot.
     assert.equal((await req('/api/conversations', { customer: 'A' }, { Origin: 'https://relay.example' })).status, 201);
     assert.equal((await req('/api/conversations', { customer: 'A' }, { Origin: 'https://evil.example' })).status, 403);

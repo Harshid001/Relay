@@ -16,6 +16,14 @@ The server connects to `MONGODB_URI` (default `mongodb://127.0.0.1:27017`), seed
 
 Open **http://127.0.0.1:3000**. Customer chat: **http://127.0.0.1:3000/?view=chat**.
 
+### Production (Vercel + MongoDB Atlas)
+
+The repo is Vercel-ready: `api/index.ts` runs the Express API as a serverless
+function, the Vite build ships as static assets, and `vercel.json` wires the
+routing (including the `ALLOWED_HOSTS` guard for `*.vercel.app` domains).
+See **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)** for the full guide — Atlas M0
+setup, environment variables, custom domains and serverless caveats.
+
 ### Production (any Ubuntu VM + Cloudflare)
 
 Complete deployment kit for a single free-tier VM (the guide uses OCI Always

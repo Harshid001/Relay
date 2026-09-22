@@ -51,8 +51,15 @@ function resolveDataDir(): string {
 
 export const DATA_DIR = resolveDataDir();
 
+// Legacy local-artifact folder — MongoDB persistence needs none of it. Best
+// effort only, so a read-only filesystem (serverless deploys) cannot crash
+// module loading.
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch {
+    /* read-only or unavailable: nothing in the app writes here */
+  }
 }
 
 /**
