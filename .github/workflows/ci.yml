@@ -24,13 +24,24 @@ jobs:
         run: |
           docker run -d --name mongo -p 27017:27017 mongo:8 \
             mongod --replSet rs0 --bind_ip_all
-          docker exec mongo mongosh --quiet --eval \
-            'while (!rs.initiate().ok) { sleep(500) }' || true
-          for i in $(seq 1 30); do
-            if docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true; then
-              echo "Mongo ready"; break
+
+          # Both mongosh calls are retried: they fail while mongod is still
+          # booting, and the driver needs a writable PRIMARY (not merely an
+          # initiated set) before tests can run. Fail loudly with mongod logs
+          # instead of silently continuing into a 23-test pile-up.
+          for i in $(seq 1 60); do
+            docker exec mongo mongosh --quiet --eval \
+              'try { rs.status().ok } catch { rs.initiate().ok }' >/dev/null 2>&1 || true
+            if docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
+              echo "Mongo ready (writable primary) after $i attempt(s)"
+              break
             fi
-            sleep 1
+            if [ "$i" -eq 60 ]; then
+              echo "::error::Mongo did not become a writable primary within ~2 minutes"
+              docker logs mongo
+              exit 1
+            fi
+            sleep 2
           done
 
       - name: Install dependencies
