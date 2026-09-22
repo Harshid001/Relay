@@ -1,0 +1,42 @@
+# Local production-like stack: app + MongoDB (single-node replica set so
+# multi-document transactions work exactly like Atlas).
+#
+#   docker compose up --build
+#   → http://127.0.0.1:3000
+#
+# Optional overrides can be set in .env next to this file:
+#   ADMIN_TOKEN, CODEBUDDY_LIVE, CODEBUDDY_API_KEY, MONGODB_DB, SEED_DEMO
+
+services:
+  mongo:
+    image: mongo:8
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: "mongosh --quiet --eval 'try { rs.status().ok } catch { rs.initiate().ok }' | grep -q 1"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: ${MONGODB_DB:-relay}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      CODEBUDDY_LIVE: ${CODEBUDDY_LIVE:-false}
+      CODEBUDDY_API_KEY: ${CODEBUDDY_API_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      PORT: 3000
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:

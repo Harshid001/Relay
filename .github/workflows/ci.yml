@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+
+      - name: Start MongoDB (single-node replica set for transactions)
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:8 \
+            mongod --replSet rs0 --bind_ip_all
+          docker exec mongo mongosh --quiet --eval \
+            'while (!rs.initiate().ok) { sleep(500) }' || true
+          for i in $(seq 1 30); do
+            if docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' | grep -q true; then
+              echo "Mongo ready"; break
+            fi
+            sleep 1
+          done
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Integration tests (real server + MongoDB)
+        run: npm test
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017

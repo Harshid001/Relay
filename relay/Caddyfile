@@ -1,0 +1,26 @@
+# Caddy reverse proxy with automatic HTTPS.
+#
+# Default: HTTP-01 challenge (needs ports 80+443 open and DNS pointing here).
+# If your Cloudflare DNS record is proxied (orange cloud), HTTP-01 still works
+# through the proxy, but the DNS-01 challenge is more robust. To use it, set
+# CF_DNS_API_TOKEN in .env.prod and uncomment the tls block.
+
+{$DOMAIN} {
+	# Uncomment for Cloudflare DNS-01 challenge:
+	# tls {
+	# 	dns cloudflare {$CF_DNS_API_TOKEN}
+	# }
+
+	encode gzip
+
+	# SSE: no buffering, long-lived connection.
+	@sse path /api/admin/events
+	reverse_proxy @sse app:3000 {
+		flush_interval -1
+	}
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+		# Pass through client IP for rate limiting behind the proxy.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

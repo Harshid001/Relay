@@ -1,0 +1,98 @@
+# Relay production stack for a single Oracle Cloud VM (Always Free ARM).
+#
+#   cp .env.prod.example .env.prod   # fill in, then:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#
+# Topology:
+#   Caddy (80/443, auto-TLS) -> relay app (:3000, not published)
+#                            -> mongo (replica set, NOT published)
+#   Nightly mongodump -> Cloudflare R2 via scripts/backup-r2.sh (cron)
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.prod}
+      # Acme DNS challenge via Cloudflare (works even with proxied DNS):
+      # leave CF_DNS_API_TOKEN empty to use the plain HTTP challenge instead.
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+  app:
+    build: .
+    restart: unless-stopped
+    # Not published: reachable only through Caddy on the docker network.
+    expose:
+      - "3000"
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: ${MONGODB_DB:-relay}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      # Security
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env.prod}
+      TRUST_PROXY: "1"
+      # Accounts (bootstrap only runs while no users exist)
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?set BOOTSTRAP_ADMIN_EMAIL in .env.prod}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in .env.prod}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Admin}
+      # Optional live LLM answers
+      CODEBUDDY_LIVE: ${CODEBUDDY_LIVE:-false}
+      CODEBUDDY_API_KEY: ${CODEBUDDY_API_KEY:-}
+      # Email notifications
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      NOTIFY_EMAILS: ${NOTIFY_EMAILS:-}
+      NOTIFY_FROM_EMAIL: ${NOTIFY_FROM_EMAIL:-Relay <onboarding@resend.dev>}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    # NOT published: only the docker network can reach it. The VM's security
+    # list + iptables should also close 27017 to the internet.
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: "mongosh --quiet --eval 'try { rs.status().ok } catch { rs.initiate().ok }' | grep -q 1"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # One-shot: initiates the replica set so transactions work (Atlas parity).
+  mongo-init:
+    image: mongo:8
+    restart: "no"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    entrypoint: >
+      bash -c '
+        sleep 3;
+        mongosh --host mongo --quiet --eval "
+          try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }
+        " && echo "replica set ready"'
+
+volumes:
+  mongo-data:
+  caddy-data:
+  caddy-config:
