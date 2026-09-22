@@ -27,11 +27,15 @@ jobs:
 
           # Both mongosh calls are retried: they fail while mongod is still
           # booting, and the driver needs a writable PRIMARY (not merely an
-          # initiated set) before tests can run. Fail loudly with mongod logs
-          # instead of silently continuing into a 23-test pile-up.
+          # initiated set) before tests can run. The member host MUST be
+          # explicit: a bare rs.initiate() registers the set under the
+          # container's own hostname, which the runner cannot resolve
+          # (getaddrinfo EAI_AGAIN <container-id>), so the driver never finds
+          # a primary. 127.0.0.1:27017 is exactly the address tests connect
+          # to. On timeout: print mongod logs and fail loudly.
           for i in $(seq 1 60); do
             docker exec mongo mongosh --quiet --eval \
-              'try { rs.status().ok } catch { rs.initiate().ok }' >/dev/null 2>&1 || true
+              'try { rs.status().ok } catch { rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]}).ok }' >/dev/null 2>&1 || true
             if docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
               echo "Mongo ready (writable primary) after $i attempt(s)"
               break
