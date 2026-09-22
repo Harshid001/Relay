@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import http from 'node:http';
 import path from 'node:path';
 import { detectIntent, searchFaqs, SEED_FAQS, policyHandoff } from '../server/knowledge.js';
 import { parseAgentReply, buildLivePrompt } from '../server/agent.js';
@@ -48,6 +49,18 @@ async function req(route: string, body?: unknown, headers: Record<string, string
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   return { status: response.status, data: await response.json() as any };
+}
+/** GET with an exact Host header (fetch may normalize Host; raw sockets don't). */
+function rawGet(url: string, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const request = http.request(
+      { host: target.hostname, port: target.port, path: target.pathname, headers: { host } },
+      (res) => { res.resume(); resolve(res.statusCode ?? 0); },
+    );
+    request.on('error', reject);
+    request.end();
+  });
 }
 async function create() {
   const result = await req('/api/conversations', { customer: 'Test Customer', email: 'customer@example.test' }, {});
@@ -186,6 +199,31 @@ test('survives an actual backend process restart without losing history or ratin
   assert.equal(detail.data.conversation.rating, 5); assert.equal(detail.data.conversation.assignee, 'Alex Morgan');
   assert.equal(detail.data.conversation.status, 'resolved');
 });
+test('host/origin guard: loopback default, ALLOWED_HOSTS opens a domain, * disables', async () => {
+  const original = base;
+  // Default: loopback works; a public Host name is rejected even on GET.
+  assert.equal(await rawGet(`${base}/api/health`, 'relay.example'), 403);
+  assert.equal((await req('/api/health', undefined, {})).status, 200);
+
+  const configured = await launch({ ALLOWED_HOSTS: 'relay.example' });
+  try {
+    base = configured.url;
+    assert.equal(await rawGet(`${base}/api/health`, 'relay.example'), 200);
+    // Host is matched by hostname, ignoring the port.
+    assert.equal(await rawGet(`${base}/api/health`, 'relay.example:8443'), 200);
+    // Origins from allowed hosts may write; strangers still cannot.
+    assert.equal((await req('/api/conversations', { customer: 'A' }, { Origin: 'https://relay.example' })).status, 201);
+    assert.equal((await req('/api/conversations', { customer: 'A' }, { Origin: 'https://evil.example' })).status, 403);
+  } finally { base = original; await stop(configured.proc); }
+
+  // ALLOWED_HOSTS="*" disables the guard entirely (documented escape hatch).
+  const open = await launch({ ALLOWED_HOSTS: '*' });
+  try {
+    base = open.url;
+    assert.equal(await rawGet(`${base}/api/health`, 'anything.example'), 200);
+  } finally { base = original; await stop(open.proc); }
+});
+
 test('a human resolve during an in-flight turn is not reverted', async () => {
   const original = base;
   // The delay keeps the assistant turn in flight while the human resolves.

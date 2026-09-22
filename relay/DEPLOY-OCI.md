@@ -157,6 +157,8 @@ docker compose -f docker-compose.prod.yml exec mongo mongosh relay
 - [ ] `ADMIN_TOKEN` is a fresh `openssl rand -hex 32`
 - [ ] `BOOTSTRAP_ADMIN_PASSWORD` is unique and 12+ chars
 - [ ] `SEED_DEMO=false` (no sample conversations in production)
+- [ ] `DOMAIN` is set (the compose file adds it to `ALLOWED_HOSTS`) — without
+      it every public request gets `403 Forbidden host`
 - [ ] VM security list exposes **only** 80/443
 - [ ] `https://yourdomain/api/health` returns `status:"ok"`
 - [ ] First login works, then invite real agents via Settings

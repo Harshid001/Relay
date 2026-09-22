@@ -16,11 +16,19 @@ The server connects to `MONGODB_URI` (default `mongodb://127.0.0.1:27017`), seed
 
 Open **http://127.0.0.1:3000**. Customer chat: **http://127.0.0.1:3000/?view=chat**.
 
-### Production (Oracle Cloud + Cloudflare)
+### Production (any Ubuntu VM + Cloudflare)
 
-Complete deployment kit for a single OCI Always Free ARM VM: Caddy auto-TLS,
-self-hosted Mongo replica set, and nightly `mongodump` backups to Cloudflare
-R2. See **[DEPLOY-OCI.md](./DEPLOY-OCI.md)**.
+Complete deployment kit for a single free-tier VM (the guide uses OCI Always
+Free; any Ubuntu VM works): Caddy auto-TLS, self-hosted Mongo replica set, and
+nightly `mongodump` backups to Cloudflare R2. See
+**[DEPLOY-OCI.md](./DEPLOY-OCI.md)**.
+
+Two settings make a public deployment work (both in `.env.prod`, see
+`.env.prod.example`): `ALLOWED_HOSTS` lists the hostnames the server answers
+for — requests with any other `Host` or `Origin` header get `403` — and
+`TRUST_PROXY` (number of proxy hops) makes rate limiting and secure cookies
+key on the real client IP from `X-Forwarded-For`. The production compose file
+wires both from `DOMAIN` automatically.
 
 ### Docker
 
@@ -81,7 +89,7 @@ SEED_DEMO=false
 
 Restart the server. The admin dashboard will request the admin token, or you can provision real accounts with `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` and sign in at the login screen. Replace the fictional FAQs with your actual policies before real use. No credentials are included or sent to the browser beyond the httpOnly session cookie; account passwords are stored only as scrypt hashes.
 
-Optional variables: `CODEBUDDY_AUTH_TOKEN`, `CODEBUDDY_MODEL`, `CODEBUDDY_CODE_PATH`, `DATA_DIR`, `PORT`, `RELAY_TURN_DELAY_MS` (artificial reply latency, 0 by default, handy for watching the loading and hand-off states). The SDK can use its installed CLI or an explicitly configured CLI path. The actual authenticated model response must be verified with your own valid credentials; it was not exercised during delivery.
+Optional variables: `CODEBUDDY_AUTH_TOKEN`, `CODEBUDDY_MODEL`, `CODEBUDDY_CODE_PATH`, `DATA_DIR`, `PORT`, `RELAY_TURN_DELAY_MS` (artificial reply latency, 0 by default, handy for watching the loading and hand-off states), `ALLOWED_HOSTS` (extra hostnames beyond loopback the server accepts; `*` disables the Host/Origin guard), `TRUST_PROXY` (proxy-hop count; enables `X-Forwarded-For` client-IP resolution). The SDK can use its installed CLI or an explicitly configured CLI path. The actual authenticated model response must be verified with your own valid credentials; it was not exercised during delivery.
 
 ## Features
 

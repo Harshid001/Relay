@@ -29,8 +29,8 @@ const FEATURES: Array<{ icon: React.ReactNode; title: string; text: string }> = 
   },
   {
     icon: <Wrench size={18} aria-hidden="true" />,
-    title: 'Real order lookups, not chatbot filler',
-    text: 'The assistant calls your order system and returns live status, carrier and tracking data.',
+    title: 'Order lookups, not chatbot filler',
+    text: 'Point the assistant at your order system and it answers with live status, carrier and tracking data. (This demo queries a sample catalogue.)',
   },
   {
     icon: <Users size={18} aria-hidden="true" />,

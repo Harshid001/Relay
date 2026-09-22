@@ -20,7 +20,9 @@
 	}
 	reverse_proxy app:3000 {
 		header_up X-Real-IP {remote_host}
-		# Pass through client IP for rate limiting behind the proxy.
-		header_up X-Forwarded-For {remote_host}
+		# X-Forwarded-For: leave to Caddy. It appends the client address to any
+		# incoming chain, which is exactly what the app's TRUST_PROXY=1 expects.
+		# Overriding it with {remote_host} would truncate the chain and collapse
+		# every visitor behind the proxy into one rate-limit bucket.
 	}
 }

@@ -73,7 +73,26 @@ const MAX_TAGS = 12;
 const MAX_TAG_LENGTH = 40;
 const MAX_CLIENT_ID = 120;
 
-const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+/**
+ * Hostnames this deployment answers for. Loopback is always allowed so the
+ * local prototype and container healthchecks work out of the box; production
+ * adds its public name(s) via ALLOWED_HOSTS (comma-separated, e.g. the DOMAIN
+ * value). Requests whose Host or Origin header is not on the list are
+ * rejected with 403. Set ALLOWED_HOSTS="*" to disable the check entirely —
+ * not recommended: the Origin guard is what blocks cross-site writes against
+ * cookie sessions.
+ */
+const ALLOWED_HOSTNAMES = new Set([
+  '127.0.0.1',
+  'localhost',
+  '::1',
+  '[::1]',
+  ...(process.env.ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean),
+]);
+const ALLOW_ALL_HOSTS = ALLOWED_HOSTNAMES.has('*');
 
 /* ------------------------------------------------------------------ *
  * App + middleware
@@ -82,7 +101,15 @@ const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 export const app = express();
 
 app.disable('x-powered-by');
-app.set('trust proxy', false);
+// Behind a TLS-terminating proxy (Caddy, Cloudflare, Vercel, …) the socket
+// address is the proxy's: set TRUST_PROXY to the number of proxy hops in
+// front of the app (1 for a single Caddy/nginx, 2 when Cloudflare proxies
+// into Caddy, …) so Express resolves req.ip from X-Forwarded-For and rate
+// limits plus secure-cookie detection key on the real client. A hop count —
+// not "true" — is spoof-proof: entries left of the trusted hops are ignored.
+// Never enable it on a port exposed directly to the internet.
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY ?? '', 10);
+app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : false);
 
 /**
  * Express 4 does not catch rejected promises from async handlers. Every async
@@ -100,12 +127,13 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
 
-  // Host / Origin safeguard: this server is a loopback-only local prototype.
+  // Host / Origin safeguard: only loopback plus ALLOWED_HOSTS (production)
+  // may address this server; anything else gets 403.
   const hostHeader = String(req.headers.host ?? '');
   if (hostHeader) {
     const match = hostHeader.match(/^(\[[^\]]+\]|[^:]+)/);
     const hostname = (match ? match[1] : hostHeader).toLowerCase();
-    if (!ALLOWED_HOSTNAMES.has(hostname)) {
+    if (!ALLOW_ALL_HOSTS && !ALLOWED_HOSTNAMES.has(hostname)) {
       res.status(403).json({ error: 'Forbidden host' });
       return;
     }
@@ -124,7 +152,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       res.status(403).json({ error: 'Forbidden origin' });
       return;
     }
-    if (!ALLOWED_HOSTNAMES.has(originHost)) {
+    if (!ALLOW_ALL_HOSTS && !ALLOWED_HOSTNAMES.has(originHost)) {
       res.status(403).json({ error: 'Forbidden origin' });
       return;
     }

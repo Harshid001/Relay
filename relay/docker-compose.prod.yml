@@ -39,6 +39,10 @@ services:
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DB: ${MONGODB_DB:-relay}
       SEED_DEMO: ${SEED_DEMO:-false}
+      # Host/Origin allowlist: loopback is always allowed; DOMAIN (plus any
+      # extra names in ALLOWED_HOSTS) unlocks public traffic. Set
+      # ALLOWED_HOSTS="*" to disable the guard entirely (not recommended).
+      ALLOWED_HOSTS: "${DOMAIN}, ${ALLOWED_HOSTS:-}"
       # Security
       ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env.prod}
       TRUST_PROXY: "1"
