@@ -95,3 +95,34 @@ export async function notifyOnEvent(event: WorkspaceEvent, conversationTitle?: s
   }
   // 'faq' events and non-waiting status changes do not warrant an email.
 }
+
+/**
+ * Sends a 6-digit verification code and magic link to the user's email.
+ */
+export async function sendVerificationEmail(toEmail: string, code: string, magicLink?: string): Promise<boolean> {
+  const subject = `Your Relay verification code: ${code}`;
+  const text = [
+    `Welcome to Relay!`,
+    '',
+    `Here is your verification code to sign in to your workspace:`,
+    '',
+    `    ${code}`,
+    '',
+    `This verification code will expire in 10 minutes.`,
+    ...(magicLink ? ['', `Alternatively, you can sign in directly by clicking this magic link:`, magicLink] : []),
+    '',
+    `If you did not request this email, you can safely ignore it.`,
+  ].join('\n');
+
+  const sent = await sendViaResend({ to: [toEmail], subject, text });
+  if (sent) {
+    log.info('verification_email_sent', { to: toEmail });
+    return true;
+  } else {
+    // Development / demo fallback: logged to console so login works without email provider
+    console.log(`[relay auth] Verification code for ${toEmail}: ${code}${magicLink ? ` (Link: ${magicLink})` : ''}`);
+    log.info('verification_email_stub', { to: toEmail, code });
+    return false;
+  }
+}
+

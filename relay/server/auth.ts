@@ -58,6 +58,16 @@ export interface AuditEventDoc {
   request_id: string | null;
 }
 
+export interface EmailVerificationDoc {
+  _id: string;
+  email: string;
+  code_hash: string;
+  token: string;
+  expires_at: Date;
+  created_at: Date;
+  attempts: number;
+}
+
 function users(): Collection<UserDoc> {
   return getDb().collection<UserDoc>('users');
 }
@@ -66,6 +76,9 @@ function sessions(): Collection<SessionDoc> {
 }
 function auditEvents(): Collection<AuditEventDoc> {
   return getDb().collection<AuditEventDoc>('audit_events');
+}
+function emailVerifications(): Collection<EmailVerificationDoc> {
+  return getDb().collection<EmailVerificationDoc>('email_verifications');
 }
 
 /* ------------------------------------------------------------------ *
@@ -98,6 +111,12 @@ export async function ensureAuthIndexes(db: Db): Promise<void> {
     ),
     db.collection<AuditEventDoc>('audit_events').createIndex({ at: -1 }),
     db.collection<AuditEventDoc>('audit_events').createIndex({ actor_id: 1, at: -1 }),
+    db.collection<EmailVerificationDoc>('email_verifications').createIndex(
+      { expires_at: 1 },
+      { expireAfterSeconds: 0 },
+    ),
+    db.collection<EmailVerificationDoc>('email_verifications').createIndex({ email: 1 }),
+    db.collection<EmailVerificationDoc>('email_verifications').createIndex({ token: 1 }),
   ]);
 }
 
@@ -417,6 +436,141 @@ export async function setUserRole(actor: SessionUser, userId: string, role: Role
   if (actor.id === userId) return false; // never demote yourself
   const result = await users().updateOne({ _id: userId }, { $set: { role } });
   return result.matchedCount > 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Email verification (OTP + Magic Link)
+ * ------------------------------------------------------------------ */
+
+export async function createEmailVerification(email: string): Promise<{ code: string; token: string; expiresAt: Date }> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const code = String(crypto.randomInt(100000, 1000000));
+  const codeHash = crypto.createHash('sha256').update(code, 'utf8').digest('hex');
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+  // Clear any existing active verifications for this email
+  await emailVerifications().deleteMany({ email: normalizedEmail });
+
+  await emailVerifications().insertOne({
+    _id: newId(),
+    email: normalizedEmail,
+    code_hash: codeHash,
+    token,
+    expires_at: expiresAt,
+    created_at: new Date(),
+    attempts: 0,
+  });
+
+  return { code, token, expiresAt };
+}
+
+export async function verifyEmailCode(email: string, code: string): Promise<boolean> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const record = await emailVerifications().findOne({ email: normalizedEmail });
+  if (!record) return false;
+  if (record.expires_at.getTime() < Date.now()) {
+    await emailVerifications().deleteOne({ _id: record._id });
+    return false;
+  }
+  if (record.attempts >= 5) {
+    await emailVerifications().deleteOne({ _id: record._id });
+    return false;
+  }
+
+  const candidateHash = crypto.createHash('sha256').update(code.trim(), 'utf8').digest('hex');
+  const a = Buffer.from(candidateHash, 'hex');
+  const b = Buffer.from(record.code_hash, 'hex');
+  const match = a.length === b.length && crypto.timingSafeEqual(a, b);
+
+  if (match) {
+    await emailVerifications().deleteOne({ _id: record._id });
+    return true;
+  } else {
+    await emailVerifications().updateOne({ _id: record._id }, { $inc: { attempts: 1 } });
+    return false;
+  }
+}
+
+export async function verifyEmailToken(token: string): Promise<string | null> {
+  if (!token) return null;
+  const record = await emailVerifications().findOne({ token });
+  if (!record) return null;
+  if (record.expires_at.getTime() < Date.now()) {
+    await emailVerifications().deleteOne({ _id: record._id });
+    return null;
+  }
+  await emailVerifications().deleteOne({ _id: record._id });
+  return record.email;
+}
+
+export async function findOrCreateUserByEmail(email: string, name?: string): Promise<SessionUser> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const existing = await findUserByEmail(normalizedEmail);
+  if (existing) {
+    await users().updateOne({ _id: existing._id }, { $set: { last_login_at: new Date().toISOString() } });
+    return toSessionUser(existing);
+  }
+
+  const count = await users().countDocuments();
+  const role: Role = count === 0 ? 'admin' : 'agent';
+  const displayName = name?.trim() || normalizedEmail.split('@')[0] || 'User';
+  const { hash, salt } = hashPassword(crypto.randomBytes(32).toString('hex'));
+
+  const userDoc: UserDoc = {
+    _id: newId(),
+    email: normalizedEmail,
+    name: displayName,
+    role,
+    password_hash: hash,
+    password_salt: salt,
+    invited_by: null,
+    created_at: new Date().toISOString(),
+    last_login_at: new Date().toISOString(),
+  };
+
+  await users().insertOne(userDoc);
+  cachedHasUsers = true;
+  return { id: userDoc._id, email: userDoc.email, name: userDoc.name, role: userDoc.role };
+}
+
+/* ------------------------------------------------------------------ *
+ * Google Sign-In (Token verification via Google OAuth2 API)
+ * ------------------------------------------------------------------ */
+
+export async function verifyGoogleIdToken(idToken: string): Promise<{ email: string; name: string; picture?: string; sub: string } | null> {
+  if (!idToken || typeof idToken !== 'string') return null;
+  try {
+    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      email?: string;
+      email_verified?: string | boolean;
+      name?: string;
+      picture?: string;
+      sub?: string;
+      aud?: string;
+    };
+    if (!data.email) return null;
+    const isVerified = data.email_verified === 'true' || data.email_verified === true;
+    if (!isVerified) return null;
+
+    const expectedAud = (process.env.GOOGLE_CLIENT_ID ?? '').trim();
+    if (expectedAud && data.aud !== expectedAud) {
+      console.warn('[relay] Google token aud mismatch:', data.aud, 'expected:', expectedAud);
+      return null;
+    }
+
+    return {
+      email: data.email.toLowerCase(),
+      name: data.name ?? data.email.split('@')[0],
+      picture: data.picture,
+      sub: data.sub ?? '',
+    };
+  } catch (err) {
+    console.error('[relay] Error verifying Google token:', err);
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ *

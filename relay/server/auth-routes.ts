@@ -18,11 +18,23 @@ import type { Request, RequestHandler, Response } from 'express';
 
 import * as auth from './auth.js';
 import { audit } from './auth.js';
+import { sendVerificationEmail } from './notify.js';
 
 export const authRouter = Router();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_NAME = 80;
+
+const emailThrottleMap = new Map<string, number>();
+function emailThrottle(email: string): boolean {
+  const now = Date.now();
+  const last = emailThrottleMap.get(email);
+  if (last && now - last < 60_000) {
+    return false;
+  }
+  emailThrottleMap.set(email, now);
+  return true;
+}
 
 /* Brute-force guard: failed logins per IP+email in a sliding window. */
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -143,6 +155,111 @@ authRouter.get(
   '/me',
   wrap(async (req, res) => {
     res.json({ user: req.user ?? null });
+  }),
+);
+
+authRouter.get(
+  '/config',
+  wrap(async (_req, res) => {
+    res.json({
+      googleClientId: (process.env.GOOGLE_CLIENT_ID ?? '').trim() || null,
+      emailVerification: true,
+    });
+  }),
+);
+
+authRouter.post(
+  '/email/send-code',
+  wrap(async (req, res) => {
+    const body = readBody(req.body);
+    const email = cleanEmail(body.email);
+    if (!email) {
+      res.status(400).json({ error: 'Enter a valid email address.' });
+      return;
+    }
+
+    if (!emailThrottle(email)) {
+      res.status(429).json({ error: 'Please wait a minute before requesting another verification code.' });
+      return;
+    }
+
+    const { code, token } = await auth.createEmailVerification(email);
+
+    // Build magic link for browser convenience
+    const origin = (req.get('origin') ?? `${req.protocol}://${req.get('host') ?? '127.0.0.1:3000'}`).replace(/\/+$/, '');
+    const magicLink = `${origin}/app?verify_token=${token}&email=${encodeURIComponent(email)}`;
+
+    await sendVerificationEmail(email, code, magicLink);
+    await audit(req, 'auth.email_code_sent', email);
+
+    const isNonProd = process.env.NODE_ENV !== 'production' && (process.env.ALLOW_AUTH_DEBUG_CODE === 'true' || !process.env.RESEND_API_KEY);
+    res.json({
+      ok: true,
+      message: 'Verification code sent to your email.',
+      ...(isNonProd ? { debugCode: code, debugToken: token } : {}),
+    });
+  }),
+);
+
+authRouter.post(
+  '/email/verify',
+  wrap(async (req, res) => {
+    const body = readBody(req.body);
+    const email = cleanEmail(body.email);
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    const token = typeof body.token === 'string' ? body.token.trim() : '';
+
+    if (!email) {
+      res.status(400).json({ error: 'Email address is required.' });
+      return;
+    }
+
+    let verified = false;
+    if (token) {
+      const tokenEmail = await auth.verifyEmailToken(token);
+      verified = tokenEmail !== null && tokenEmail === email;
+    } else if (code) {
+      verified = await auth.verifyEmailCode(email, code);
+    } else {
+      res.status(400).json({ error: 'Verification code or token is required.' });
+      return;
+    }
+
+    if (!verified) {
+      await audit(req, 'auth.email_verify_failed', email);
+      res.status(401).json({ error: 'Invalid or expired verification code.' });
+      return;
+    }
+
+    const user = await auth.findOrCreateUserByEmail(email);
+    const sessionToken = await auth.createSession(user.id, req.get('user-agent') ?? null);
+    auth.setSessionCookie(req, res, sessionToken);
+    await audit(req, 'auth.email_verified_login', user.email);
+    res.json({ user });
+  }),
+);
+
+authRouter.post(
+  '/google',
+  wrap(async (req, res) => {
+    const body = readBody(req.body);
+    const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+    if (!credential) {
+      res.status(400).json({ error: 'Google credential is required.' });
+      return;
+    }
+
+    const googleUser = await auth.verifyGoogleIdToken(credential);
+    if (!googleUser || !googleUser.email) {
+      res.status(401).json({ error: 'Google authentication failed or email unverified.' });
+      return;
+    }
+
+    const user = await auth.findOrCreateUserByEmail(googleUser.email, googleUser.name);
+    const sessionToken = await auth.createSession(user.id, req.get('user-agent') ?? null);
+    auth.setSessionCookie(req, res, sessionToken);
+    await audit(req, 'auth.google_login', user.email);
+    res.json({ user });
   }),
 );
 

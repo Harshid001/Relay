@@ -158,11 +158,27 @@ export interface ManagedUser extends SessionUser {
   lastLoginAt: string | null;
 }
 
+export interface AuthConfig {
+  googleClientId: string | null;
+  emailVerification: boolean;
+}
+
 export const authApi = {
   me: () => request<{ user: SessionUser | null }>('/api/auth/me'),
 
+  getConfig: () => request<AuthConfig>('/api/auth/config'),
+
   login: (email: string, password: string) =>
     post<{ user: SessionUser }>('/api/auth/login', { email, password }),
+
+  sendEmailCode: (email: string) =>
+    post<{ ok: true; message: string; debugCode?: string }>('/api/auth/email/send-code', { email }),
+
+  verifyEmail: (email: string, code?: string, token?: string) =>
+    post<{ user: SessionUser }>('/api/auth/email/verify', { email, code, token }),
+
+  loginWithGoogle: (credential: string) =>
+    post<{ user: SessionUser }>('/api/auth/google', { credential }),
 
   logout: () => post<{ ok: true }>('/api/auth/logout'),
 

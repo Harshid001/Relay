@@ -22,7 +22,7 @@ let savedMessageCount = 0;
 async function launch(extra: Record<string, string> = {}) {
   const proc = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), path.join(project, 'tests/server-fixture.ts')], {
     cwd: project,
-    env: { ...process.env, DATA_DIR: dataDir, ADMIN_TOKEN: 'test-admin-only', SEED_DEMO: 'false', CODEBUDDY_LIVE: 'false', MONGODB_DB: `relay_test_${path.basename(dataDir).replace(/[^a-z0-9]/gi, '')}`, ...extra },
+    env: { ...process.env, DATA_DIR: dataDir, ADMIN_TOKEN: 'test-admin-only', SEED_DEMO: 'false', CODEBUDDY_LIVE: 'false', RESEND_API_KEY: '', ALLOW_AUTH_DEBUG_CODE: 'true', MONGODB_DB: `relay_test_${path.basename(dataDir).replace(/[^a-z0-9]/gi, '')}`, ...extra },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const url = await new Promise<string>((resolve, reject) => {
@@ -48,7 +48,7 @@ async function req(route: string, body?: unknown, headers: Record<string, string
     headers: { ...headers, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  return { status: response.status, data: await response.json() as any };
+  return { status: response.status, data: await response.json() as any, headers: response.headers };
 }
 /** GET with an exact Host header (fetch may normalize Host; raw sockets don't). */
 function rawGet(url: string, host: string): Promise<number> {
@@ -631,5 +631,88 @@ test('plan limits: AI message limit preserves user message, escalates to waiting
     await stop(instance.proc);
   }
 });
+
+test('auth: config endpoint returns auth capabilities and googleClientId', async () => {
+  const result = await req('/api/auth/config', undefined, {});
+  assert.equal(result.status, 200);
+  assert.equal(result.data.emailVerification, true);
+  assert.equal(typeof result.data.googleClientId === 'string' || result.data.googleClientId === null, true);
+});
+
+test('auth: email verification code flow (send code, rate limit, wrong code, valid code, session cookie, replay protection)', async () => {
+  const testEmail = `pilot-${Date.now()}@relay.test`;
+
+  // 1. Invalid email rejected
+  const badEmail = await req('/api/auth/email/send-code', { email: 'not-an-email' }, {});
+  assert.equal(badEmail.status, 400);
+
+  // 2. Send code successfully
+  const sendRes = await req('/api/auth/email/send-code', { email: testEmail }, {});
+  assert.equal(sendRes.status, 200);
+  assert.equal(sendRes.data.ok, true);
+  assert.ok(sendRes.data.debugCode, 'Expected debugCode in non-prod mode');
+  const code = sendRes.data.debugCode as string;
+  assert.match(code, /^\d{6}$/);
+
+  // 3. Rate limiting (consecutive request within 60s)
+  const throttled = await req('/api/auth/email/send-code', { email: testEmail }, {});
+  assert.equal(throttled.status, 429);
+
+  // 4. Verify with incorrect code
+  const wrongRes = await req('/api/auth/email/verify', { email: testEmail, code: '000000' }, {});
+  assert.equal(wrongRes.status, 401);
+
+  // 5. Verify with correct code
+  const verifyRes = await req('/api/auth/email/verify', { email: testEmail, code }, {});
+  assert.equal(verifyRes.status, 200);
+  assert.equal(verifyRes.data.user.email, testEmail);
+  assert.ok(verifyRes.data.user.id);
+  assert.ok(['admin', 'agent'].includes(verifyRes.data.user.role));
+
+  // Check Set-Cookie header contains relay_session
+  const setCookie = verifyRes.headers.get('set-cookie');
+  assert.ok(setCookie, 'Expected Set-Cookie header');
+  assert.match(setCookie, /relay_session=/);
+
+  // 6. Access /api/auth/me using the session cookie
+  const cookiePart = setCookie.split(';')[0];
+  const meRes = await req('/api/auth/me', undefined, { cookie: cookiePart });
+  assert.equal(meRes.status, 200);
+  assert.equal(meRes.data.user.email, testEmail);
+
+  // 7. Replay protection (code is single-use)
+  const reuseRes = await req('/api/auth/email/verify', { email: testEmail, code }, {});
+  assert.equal(reuseRes.status, 401);
+});
+
+test('auth: email magic link token flow (verify with token, single-use, agent role provisioning)', async () => {
+  const tokenEmail = `magic-${Date.now()}@relay.test`;
+
+  // Request code/token
+  const sendRes = await req('/api/auth/email/send-code', { email: tokenEmail }, {});
+  assert.equal(sendRes.status, 200);
+  assert.ok(sendRes.data.debugToken, 'Expected debugToken in non-prod mode');
+  const token = sendRes.data.debugToken as string;
+
+  // Verify using magic link token
+  const verifyRes = await req('/api/auth/email/verify', { email: tokenEmail, token }, {});
+  assert.equal(verifyRes.status, 200);
+  assert.equal(verifyRes.data.user.email, tokenEmail);
+
+  // Replay protection (token is single-use)
+  const reuseRes = await req('/api/auth/email/verify', { email: tokenEmail, token }, {});
+  assert.equal(reuseRes.status, 401);
+});
+
+test('auth: Google sign-in endpoint validates credential input and rejects invalid tokens', async () => {
+  // Empty credential rejected
+  const emptyRes = await req('/api/auth/google', { credential: '' }, {});
+  assert.equal(emptyRes.status, 400);
+
+  // Invalid fake credential rejected by Google OAuth verification
+  const fakeRes = await req('/api/auth/google', { credential: 'fake.google.jwt.token' }, {});
+  assert.equal(fakeRes.status, 401);
+});
+
 
 

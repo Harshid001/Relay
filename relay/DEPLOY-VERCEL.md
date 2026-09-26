@@ -48,7 +48,8 @@ and `vercel.json` routes `/api/*` to it while serving the Vite build from
    | `ALLOWED_HOSTS` | `*.vercel.app` (preview deploys) plus your custom domain |
    | `BOOTSTRAP_ADMIN_EMAIL` | you@yourdomain.com |
    | `BOOTSTRAP_ADMIN_PASSWORD` | 12+ characters |
-   | `NOTIFY_EMAILS` / `RESEND_API_KEY` | optional email alerts |
+   | `GOOGLE_CLIENT_ID` | optional Google OAuth Client ID for 1-click Google Sign-In |
+   | `NOTIFY_EMAILS` / `RESEND_API_KEY` | optional email alerts and verification OTP/magic link delivery |
    | `CODEBUDDY_LIVE` | keep `false` — the live SDK path spawns a CLI process and is not serverless-safe |
    | `FREE_CONVERSATIONS_LIMIT` | optional; default `300`, set `0` for unlimited |
    | `FREE_AI_MESSAGES_LIMIT` | optional; default `1000`, set `0` for unlimited |

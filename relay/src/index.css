@@ -2162,6 +2162,83 @@ mark.cite .cite-note {
   align-self: center;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border, #e5e7eb);
+}
+
+.btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 550;
+  border-radius: 8px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--surface, #fff);
+  color: var(--ink, #0f172a);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-google:hover:not(:disabled) {
+  background: var(--surface-sunken, #f8fafc);
+  border-color: #cbd5e1;
+}
+
+.auth-tabs {
+  display: flex;
+  background: var(--surface-sunken, #f1f5f9);
+  padding: 3px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  gap: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 550;
+  border: none;
+  background: transparent;
+  color: var(--muted, #64748b);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.auth-tab.active {
+  background: var(--surface, #fff);
+  color: var(--ink, #0f172a);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.auth-otp-input {
+  font-size: 20px;
+  letter-spacing: 0.25em;
+  text-align: center;
+  font-family: monospace;
+  font-weight: 700;
+}
+
 .auth-error-detail {
   background: rgba(239, 68, 68, 0.07);
   border: 1px solid rgba(239, 68, 68, 0.2);
