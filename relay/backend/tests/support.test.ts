@@ -420,7 +420,9 @@ test('account auth: bootstrap, login, session cookies, RBAC and logout', async (
     assert.equal(login.status, 200);
     const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
     assert.ok(cookie.startsWith('relay_session='));
-    const admin = { cookie };
+    const loginBody = (await login.json()) as any;
+    assert.ok(typeof loginBody.csrfToken === 'string' && loginBody.csrfToken.length > 0);
+    const admin = { cookie, 'x-csrf-token': loginBody.csrfToken as string };
 
     const me = await req('/api/auth/me', undefined, admin);
     assert.equal(me.data.user.email, 'owner@relay.test');
@@ -439,7 +441,8 @@ test('account auth: bootstrap, login, session cookies, RBAC and logout', async (
       body: JSON.stringify({ email: 'agent@relay.test', password: 'agent-pass-12345' }),
     });
     const agentCookie = (agentLogin.headers.get('set-cookie') ?? '').split(';')[0];
-    const agentHeaders = { cookie: agentCookie };
+    const agentBody = (await agentLogin.json()) as any;
+    const agentHeaders = { cookie: agentCookie, 'x-csrf-token': agentBody.csrfToken as string };
     const agentRead = await req('/api/admin/conversations', undefined, agentHeaders);
     assert.equal(agentRead.status, 200);
     const agentWrite = await req('/api/admin/faqs', { title: 'x', answer: 'y', category: 'general', tags: [] }, agentHeaders);
@@ -456,6 +459,134 @@ test('account auth: bootstrap, login, session cookies, RBAC and logout', async (
     assert.equal(logout.status, 200);
     const afterLogout = await req('/api/admin/conversations', undefined, admin);
     assert.equal(afterLogout.status, 401);
+  } finally {
+    base = original;
+    await stop(instance.proc);
+  }
+});
+
+test('security headers: helmet CSP, HSTS and frame guard present', async () => {
+  const health = await req('/api/health', undefined, {});
+  assert.equal(health.status, 200);
+  const csp = health.headers.get('content-security-policy') ?? '';
+  assert.match(csp, /default-src 'self'/);
+  assert.match(csp, /accounts\.google\.com/);
+  assert.match(csp, /fonts\.googleapis\.com/);
+  assert.match(csp, /frame-ancestors 'self'/);
+  assert.ok(health.headers.get('strict-transport-security'), 'HSTS header missing');
+  assert.equal(health.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert.equal(health.headers.get('x-content-type-options'), 'nosniff');
+});
+
+test('serves an OpenAPI reference describing the route table', async () => {
+  const doc = await req('/api/openapi.json', undefined, {});
+  assert.equal(doc.status, 200);
+  assert.equal(doc.data.openapi, '3.1.0');
+  for (const path of [
+    '/health', '/metrics', '/faqs', '/conversations', '/conversations/{id}',
+    '/auth/login', '/auth/me', '/auth/google', '/admin/conversations',
+    '/admin/faqs', '/admin/stats', '/admin/onboarding/sample-knowledge',
+  ]) {
+    assert.ok(doc.data.paths[path], `missing OpenAPI path ${path}`);
+  }
+  // Also served under the versioned mount.
+  const v1 = await req('/api/v1/openapi.json', undefined, {});
+  assert.equal(v1.status, 200);
+  assert.equal(v1.data.data.openapi, '3.1.0');
+});
+
+test('auth: CSRF token required for cookie-session mutations but not header-token calls', async () => {
+  const original = base;
+  const instance = await launch({
+    ADMIN_TOKEN: '',
+    BOOTSTRAP_ADMIN_EMAIL: 'csrf@relay.test',
+    BOOTSTRAP_ADMIN_PASSWORD: 'csrf-pass-12345',
+    BOOTSTRAP_ADMIN_NAME: 'Csrf Owner',
+    MONGODB_DB: `relay_test_csrf_${Date.now()}`,
+  });
+  base = instance.url;
+  try {
+    const loginRes = await fetch(base + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'csrf@relay.test', password: 'csrf-pass-12345' }),
+    });
+    assert.equal(loginRes.status, 200);
+    const loginBody = (await loginRes.json()) as any;
+    const cookie = (loginRes.headers.get('set-cookie') ?? '').split(';')[0];
+    assert.ok(cookie.startsWith('relay_session='));
+    assert.ok(typeof loginBody.csrfToken === 'string' && loginBody.csrfToken.length >= 32);
+    const authed = (extra: Record<string, string> = {}) =>
+      req('/api/auth/users', { email: `csrf-new-${Date.now()}@relay.test`, name: 'Csrf New', role: 'agent', password: 'csrf-new-pass-123' }, { cookie, ...extra });
+
+    // Safe methods stay usable without a token.
+    const list = await req('/api/admin/conversations', undefined, { cookie });
+    assert.equal(list.status, 200);
+
+    // Mutation without a token is rejected, even with a valid session.
+    const missing = await authed();
+    assert.equal(missing.status, 403);
+
+    // Wrong token is rejected.
+    const wrong = await authed({ 'x-csrf-token': 'not-the-token' });
+    assert.equal(wrong.status, 403);
+
+    // Correct token works.
+    const okInvite = await authed({ 'x-csrf-token': loginBody.csrfToken as string });
+    assert.equal(okInvite.status, 201);
+
+    // /me re-issues the same token for the session.
+    const meAgain = await req('/api/auth/me', undefined, { cookie });
+    assert.equal(meAgain.data.csrfToken, loginBody.csrfToken);
+
+    // Logout is a mutation too: rejected without the token, honored with it.
+    const logoutDenied = await req('/api/auth/logout', {}, { cookie });
+    assert.equal(logoutDenied.status, 403);
+    const logoutOk = await req('/api/auth/logout', {}, { cookie, 'x-csrf-token': loginBody.csrfToken as string });
+    assert.equal(logoutOk.status, 200);
+  } finally {
+    base = original;
+    await stop(instance.proc);
+  }
+});
+
+test('abuse controls: concurrent turns get 409, the per-minute message budget ends in 429', async () => {
+  const original = base;
+  const instance = await launch({
+    RELAY_TURN_DELAY_MS: '2000',
+    MONGODB_DB: `relay_test_abuse_${Date.now()}`,
+  });
+  try {
+    base = instance.url;
+    const session = await create();
+
+    // The message limiter is a fixed wall-clock window. Start from a fresh
+    // minute boundary so the 41 sends below cannot straddle a window reset
+    // (which would zero the counter and flake the final 429 assertion).
+    const msIntoWindow = Date.now() % 60_000;
+    if (msIntoWindow > 45_000) {
+      await new Promise((resolve) => setTimeout(resolve, 60_000 - msIntoWindow + 250));
+    }
+
+    // Two overlapping turns: exactly one wins the lock, the other is rejected.
+    // Either order is valid — the sends race — so assert on the outcome set.
+    const [r1, r2] = await Promise.all([
+      send(session, 'What is your refund policy?', `abuse-first-${Date.now()}`),
+      send(session, 'And what about shipping?', `abuse-second-${Date.now()}`),
+    ]);
+    assert.deepEqual([r1.status, r2.status].sort((a, b) => a - b), [200, 409]);
+    const rejected = r1.status === 409 ? r1 : r2;
+    assert.match(rejected.data.error, /already being generated/);
+
+    // Fresh budget accounting: 2 sends above + 38 more = 40 allowed, the 41st is rejected.
+    for (let i = 0; i < 38; i += 1) {
+      const r = await send(session, `Budget probe ${i}`, `abuse-budget-${Date.now()}-${i}`);
+      assert.equal(r.status, 200);
+    }
+    const over = await send(session, 'One over the line', `abuse-over-${Date.now()}`);
+    assert.equal(over.status, 429);
+    assert.match(over.data.error, /Too many requests/);
+    assert.ok(Number(over.headers.get('retry-after')) >= 1, 'Retry-After header missing');
   } finally {
     base = original;
     await stop(instance.proc);

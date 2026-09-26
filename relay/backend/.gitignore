@@ -2,6 +2,9 @@ node_modules/
 data/
 artifacts/
 backups/
+coverage/
+test-results/
+playwright-report/
 .env
 .env.*
 !.env.example

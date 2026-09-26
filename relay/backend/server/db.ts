@@ -12,9 +12,13 @@
  *                       correlated subqueries.
  *   messages          - one doc per message; `sources` and `tool` are embedded.
  *   idempotency_keys  - TTL collection: entries expire after 24h (replaces the
- *                       manual DELETE sweep).
+ *                       manual DELETE sweep.
  *   faqs              - one doc per knowledge base article.
  *   meta              - key/value markers (demo seeding).
+ *   rate_limits       - fixed-window abuse counters, TTL-cleaned (see
+ *                       server/ratelimit.ts).
+ *   turn_locks        - one doc per in-flight assistant turn, TTL = crash
+ *                       recovery for abandoned locks.
  *
  * Multi-instance notes (production SaaS):
  *   - Rate limiting and per-conversation busy locks live in server/index.ts in
@@ -30,14 +34,20 @@ import { fileURLToPath } from 'node:url';
 
 import { MongoClient, type Collection, type Db, type WithId } from 'mongodb';
 
-import { SEED_FAQS, type FaqRecord, type Intent } from './knowledge.js';
+import { SEED_FAQS, type Intent } from './knowledge.js';
 import { findOrderById, orderStatusSentence } from './orders.js';
+import { runMigrations } from './migrations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /** Project root (the folder that contains `server/`). */
-export const PROJECT_ROOT = path.resolve(__dirname, '..');
+export const PROJECT_ROOT = (() => {
+  const root = path.resolve(__dirname, '..');
+  // Compiled production layout is dist/server/*.js, so the root is one level
+  // higher there (dist/) than in the tsx/dev layout (server/).
+  return path.basename(root) === 'dist' ? path.resolve(root, '..') : root;
+})();
 
 export const IS_LIVE = process.env.CODEBUDDY_LIVE === 'true';
 
@@ -103,6 +113,7 @@ export async function connectToDatabase(): Promise<Db> {
     const connected = await connectPromise;
     database = connected.db(DB_NAME);
     await ensureIndexes(database);
+    await runMigrations(database);
     return database;
   } catch (error) {
     connectPromise = null;
@@ -1487,6 +1498,10 @@ async function seedDemoConversations(): Promise<void> {
 }
 
 async function seedFaqsIfEmpty(): Promise<void> {
+  // Live deployments start with an empty knowledge base. The sample policies
+  // describe a made-up retailer, so they are only ever loaded on demand from
+  // the admin workspace ("Use sample policies").
+  if (IS_LIVE) return;
   const count = await faqsCollection().countDocuments();
   if (count > 0) return;
   const updatedAt = nowIso();
@@ -1505,7 +1520,9 @@ async function seedFaqsIfEmpty(): Promise<void> {
 }
 
 async function seedDemoConversationsIfNeeded(): Promise<void> {
-  if (process.env.SEED_DEMO === 'false') return;
+  // Opt-in: demo conversations are seeded only when SEED_DEMO=true, so a fresh
+  // deploy with no configuration starts with an empty workspace.
+  if (process.env.SEED_DEMO !== 'true') return;
   if (IS_LIVE) return;
 
   const marker = await meta().findOne({ _id: 'demo_seeded' });
@@ -1532,8 +1549,12 @@ async function seedDemoConversationsIfNeeded(): Promise<void> {
 }
 
 /**
- * Seeds FAQs (always, when empty) and clearly-labelled demo conversations
- * (once). Called during server startup after the database connection opens.
+ * Seeds the knowledge base and demo conversations only for the local demo
+ * experience, and only when explicitly opted in:
+ *   - FAQs: skipped entirely in live mode; otherwise seeded when empty.
+ *   - Demo conversations: seeded once, only when SEED_DEMO=true.
+ * A production deploy (CODEBUDDY_LIVE=true) starts with both empty. Called
+ * during server startup after the database connection opens.
  */
 export async function seedDatabase(): Promise<void> {
   await seedFaqsIfEmpty();

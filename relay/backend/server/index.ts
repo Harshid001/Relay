@@ -1,5 +1,5 @@
 /**
- * Relay Store support backend - HTTP API.
+ * Relay Store support backend - HTTP API composition root.
  *
  * Express 4, bound to 127.0.0.1:3000 only by default (set HOST/PORT to change).
  * Serves the production frontend from `dist/` with an SPA fallback and exposes
@@ -10,112 +10,43 @@
  *     `isDemo: true`; the frontend labels it. Admin routes are open on loopback.
  *   - live (CODEBUDDY_LIVE=true): requires ADMIN_TOKEN, otherwise startup fails.
  *
- * Persistence is MongoDB (server/db.ts); startup connects, seeds, then listens.
- * Credentials never reach the client: only the health endpoint reports the mode.
+ * This file owns wiring and lifecycle only; the pieces live in focused modules:
+ *   server/config.ts            environment config + Host/Origin guard
+ *   server/validation.ts        request-body validation helpers
+ *   server/routes/system.ts     health, metrics, OpenAPI, SSE
+ *   server/routes/customer.ts   FAQs and customer conversations
+ *   server/routes/admin.ts      queue, stats, FAQ writes, onboarding
  */
 
-import express, { type NextFunction, type Request, type Response, type RequestHandler } from 'express';
-import crypto from 'node:crypto';
+import express, { type NextFunction, type Request, type Response } from 'express';
+import helmet from 'helmet';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as store from './db.js';
-import { clearFaqTermCache, INTENTS, type Intent } from './knowledge.js';
-import {
-  DEFAULT_ASSIGNEE,
-  generateDemoTurn,
-  generateLiveTurn,
-  handoffMessage,
-  isLiveMode,
-  type AgentTurnResult,
-  type ToolEvent,
-  type TurnHistoryItem,
-} from './agent.js';
 import * as auth from './auth.js';
-import { authRouter } from './auth-routes.js';
-import { publish, subscribe, subscriberCount } from './events.js';
-import { notifyOnEvent } from './notify.js';
-import { requestLogging } from './logger.js';
-import { envelope, fail, metricsMiddleware, metricsText, ok } from './http.js';
-import { telemetry } from './telemetry.js';
 import {
-  METERING_ENABLED,
-  aiMessagesLimitReached,
-  conversationsLimitReached,
-  currentMonthWindow,
-  getUsageSummary,
-  limitMessage,
-} from './plan.js';
+  ADMIN_AUTH_REQUIRED,
+  HOST,
+  LIVE,
+  MODE,
+  PORT,
+  TRUST_PROXY_ENABLED,
+  TRUST_PROXY_HOPS,
+  hostOriginGuard,
+} from './config.js';
+import * as store from './db.js';
+import { startEventBridge } from './events.js';
+import { envelope, metricsMiddleware } from './http.js';
+import { requestLogging } from './logger.js';
+import { initMonitoring, initProcessErrorHandlers, reportError } from './monitoring.js';
+import * as rateLimiters from './ratelimit.js';
+import { registerAdminRoutes } from './routes/admin.js';
+import { registerCustomerRoutes } from './routes/customer.js';
+import { registerSystemRoutes } from './routes/system.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-/* ------------------------------------------------------------------ *
- * Configuration
- * ------------------------------------------------------------------ */
-
-const PORT = Number(process.env.PORT ?? 3000);
-const HOST = process.env.HOST ?? '127.0.0.1';
-
-const LIVE = isLiveMode();
-const ADMIN_TOKEN = (process.env.ADMIN_TOKEN ?? '').trim();
-const ADMIN_AUTH_REQUIRED = ADMIN_TOKEN.length > 0;
-
-if (LIVE && !ADMIN_AUTH_REQUIRED) {
-  console.error(
-    '[relay] CODEBUDDY_LIVE=true requires ADMIN_TOKEN to be set. Refusing to start in live mode without admin authentication.',
-  );
-  process.exit(1);
-}
-
-const MODE: 'demo' | 'live' = LIVE ? 'live' : 'demo';
-
-const MAX_CONTENT = 4000;
-const MAX_EMAIL = 200;
-const MAX_CUSTOMER = 80;
-const MAX_REASON = 300;
-const MAX_TITLE = 200;
-const MAX_ANSWER = 4000;
-const MAX_ASSIGNEE = 80;
-const MAX_TAGS = 12;
-const MAX_TAG_LENGTH = 40;
-const MAX_CLIENT_ID = 120;
-
-/**
- * Hostnames this deployment answers for. Loopback is always allowed so the
- * local prototype and container healthchecks work out of the box; production
- * adds its public name(s) via ALLOWED_HOSTS (comma-separated, e.g. the DOMAIN
- * value). Requests whose Host or Origin header is not on the list are
- * rejected with 403. Set ALLOWED_HOSTS="*" to disable the check entirely —
- * not recommended: the Origin guard is what blocks cross-site writes against
- * cookie sessions.
- */
-const ALLOWED_HOSTNAMES = new Set([
-  '127.0.0.1',
-  'localhost',
-  '::1',
-  '[::1]',
-  ...(process.env.ALLOWED_HOSTS ?? '')
-    .split(',')
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean),
-]);
-const ALLOW_ALL_HOSTS = ALLOWED_HOSTNAMES.has('*');
-
-/** Exact names plus suffix wildcards like "*.vercel.app" (any subdomain). */
-function hostAllowed(hostname: string): boolean {
-  if (ALLOW_ALL_HOSTS) return true;
-  for (const entry of ALLOWED_HOSTNAMES) {
-    if (entry.startsWith('*.')) {
-      const suffix = entry.slice(1); // '.vercel.app'
-      if (hostname.endsWith(suffix) && hostname.length > suffix.length) return true;
-    } else if (hostname === entry) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /* ------------------------------------------------------------------ *
  * App + middleware
@@ -124,65 +55,44 @@ function hostAllowed(hostname: string): boolean {
 export const app = express();
 
 app.disable('x-powered-by');
-// Behind a TLS-terminating proxy (Caddy, Cloudflare, Vercel, …) the socket
-// address is the proxy's: set TRUST_PROXY to the number of proxy hops in
-// front of the app (1 for a single Caddy/nginx, 2 when Cloudflare proxies
-// into Caddy, …) so Express resolves req.ip from X-Forwarded-For and rate
-// limits plus secure-cookie detection key on the real client. A hop count —
-// not "true" — is spoof-proof: entries left of the trusted hops are ignored.
-// Never enable it on a port exposed directly to the internet.
-const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY ?? '', 10);
-app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : false);
+// Trust a fixed number of proxy hops (see server/config.ts) so Express resolves
+// req.ip from X-Forwarded-For and secure-cookie detection keys on the client.
+app.set('trust proxy', TRUST_PROXY_ENABLED ? TRUST_PROXY_HOPS : false);
 
 /**
- * Express 4 does not catch rejected promises from async handlers. Every async
- * route is wrapped so rejections become proper 500 responses instead of
- * unhandled rejections that leave the request hanging.
+ * Standard security headers via helmet. The CSP allowlist covers the only
+ * third parties the client loads: Google Identity Services (Auth.tsx injects
+ * https://accounts.google.com/gsi/client) and the Inter typeface
+ * (index.css @imports fonts.googleapis.com). React renders component styles
+ * as inline `style` attributes, hence style-src 'unsafe-inline'. Everything
+ * else is same-origin.
  */
-function wrap(handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler {
-  return (req, res, next) => {
-    handler(req, res, next).catch(next);
-  };
-}
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", 'https://accounts.google.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'", 'https://accounts.google.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'self'"],
+        frameSrc: ["'self'", 'https://accounts.google.com'],
+      },
+    },
+    // GSI may use popups during account selection; allow them while keeping
+    // same-origin opener protection for everything else.
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+  }),
+);
 
-app.use((req: Request, res: Response, next: NextFunction) => {
-  res.setHeader('X-Relay-Mode', MODE);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-
-  // Host / Origin safeguard: only loopback plus ALLOWED_HOSTS (production)
-  // may address this server; anything else gets 403.
-  const hostHeader = String(req.headers.host ?? '');
-  if (hostHeader) {
-    const match = hostHeader.match(/^(\[[^\]]+\]|[^:]+)/);
-    const hostname = (match ? match[1] : hostHeader).toLowerCase();
-    if (!hostAllowed(hostname)) {
-      res.status(403).json({ error: 'Forbidden host' });
-      return;
-    }
-  }
-
-  const origin = req.headers.origin;
-  if (origin === 'null') {
-    res.status(403).json({ error: 'Forbidden origin' });
-    return;
-  }
-  if (typeof origin === 'string' && origin) {
-    let originHost = '';
-    try {
-      originHost = new URL(origin).hostname.toLowerCase();
-    } catch {
-      res.status(403).json({ error: 'Forbidden origin' });
-      return;
-    }
-    if (!hostAllowed(originHost)) {
-      res.status(403).json({ error: 'Forbidden origin' });
-      return;
-    }
-  }
-
-  next();
-});
+// Mode header + Host/Origin allowlist (403 on mismatch).
+app.use(hostOriginGuard);
 
 app.use(express.json({ limit: '32kb' }));
 
@@ -194,983 +104,27 @@ app.use(metricsMiddleware());
 // Mounts both legacy unwrapped (/api) and versioned enveloped (/api/v1).
 export const apiRouter = express.Router();
 
-/* ------------------------------------------------------------------ *
- * Realtime: admin Server-Sent Events stream
- * (registered AFTER auth.attachUser below - see app.use ordering)
- * ------------------------------------------------------------------ */
-
-/** Publishes a conversation event and triggers any email notification. */
-function emitConversation(id: string, status: string | null, title?: string): void {
-  publish({ type: 'conversation', id, status });
-  void notifyOnEvent({ type: 'conversation', id, status }, title);
-}
-
-/* ------------------------------------------------------------------ *
- * In-memory rate limiting
- * (single-instance only; move to a shared store for horizontal scaling)
- * ------------------------------------------------------------------ */
-
-interface RateBucket {
-  count: number;
-  resetAt: number;
-}
-
-const rateBuckets = new Map<string, RateBucket>();
-
-function rateLimit(name: string, max: number, windowMs: number) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const key = `${name}|${req.ip ?? 'unknown'}`;
-    const now = Date.now();
-    const bucket = rateBuckets.get(key);
-
-    if (!bucket || bucket.resetAt <= now) {
-      rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-      next();
-      return;
-    }
-
-    bucket.count += 1;
-    if (bucket.count > max) {
-      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
-      res.status(429).json({ error: 'Too many requests. Please slow down.' });
-      return;
-    }
-    next();
-  };
-}
-
-const apiLimiter = rateLimit('api', 600, 60_000);
-const writeLimiter = rateLimit('write', 120, 60_000);
-const messageLimiter = rateLimit('message', 40, 60_000);
-
-const rateCleanup = setInterval(() => {
-  const now = Date.now();
-  rateBuckets.forEach((bucket, key) => {
-    if (bucket.resetAt <= now) rateBuckets.delete(key);
-  });
-}, 5 * 60_000);
-rateCleanup.unref?.();
-
-/* ------------------------------------------------------------------ *
- * Auth helpers
- * ------------------------------------------------------------------ */
-
-function timingSafeEqualString(a: string, b: string): boolean {
-  const digestA = crypto.createHash('sha256').update(a, 'utf8').digest();
-  const digestB = crypto.createHash('sha256').update(b, 'utf8').digest();
-  return crypto.timingSafeEqual(digestA, digestB);
-}
-
-/** Conversation owner guard - 404 for both missing and invalid tokens. */
-const requireConversationAccess: RequestHandler = wrap(async (req, res, next) => {
-  const conversationId = req.params.id;
-  const token = req.get('x-conversation-token') ?? '';
-  if (!conversationId || !token || !(await store.verifyConversationToken(conversationId, token))) {
-    res.status(404).json({ error: 'Conversation not found' });
-    return;
-  }
-  next();
+registerSystemRoutes(apiRouter, { requireUser: auth.requireAuth });
+registerCustomerRoutes(apiRouter);
+registerAdminRoutes(apiRouter, {
+  requireUser: auth.requireAuth,
+  requireAdminRole: auth.requireRole('admin'),
 });
-
-/**
- * Unified admin guard: req.user is set either by a cookie session or by the
- * legacy shared-token path inside attachUser (which only activates while no
- * accounts exist). Agents can read the workspace; admins-only routes use
- * requireAdminRole below.
- */
-function requireUser(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user) {
-    res.status(401).json({ error: 'Authentication required' });
-    return;
-  }
-  next();
-}
-
-/** Admin-only mutations (FAQ writes, role changes). */
-function requireAdminRole(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user) {
-    res.status(401).json({ error: 'Authentication required' });
-    return;
-  }
-  if (req.user.role !== 'admin') {
-    res.status(403).json({ error: 'Insufficient permissions' });
-    return;
-  }
-  next();
-}
-
-/* ------------------------------------------------------------------ *
- * Validation helpers
- * ------------------------------------------------------------------ */
-
-function asRecord(body: unknown): Record<string, unknown> {
-  return body && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
-}
-
-function readRequiredString(value: unknown, max: number): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > max) return null;
-  return trimmed;
-}
-
-function readOptionalString(value: unknown, max: number): string | null | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (trimmed.length > max) return null;
-  return trimmed;
-}
-
-function parseIntent(value: unknown): Intent | null {
-  return typeof value === 'string' && (INTENTS as string[]).includes(value)
-    ? (value as Intent)
-    : null;
-}
-
-function parseTags(value: unknown): string[] | null {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) return null;
-  if (value.length > MAX_TAGS) return null;
-  const tags: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'string') return null;
-    const tag = entry.trim();
-    if (!tag) continue;
-    if (tag.length > MAX_TAG_LENGTH) return null;
-    if (!tags.includes(tag)) tags.push(tag);
-  }
-  return tags;
-}
-
-/* ------------------------------------------------------------------ *
- * Per-conversation busy lock
- * (in-memory; single-instance only)
- * ------------------------------------------------------------------ */
-
-const busyConversations = new Set<string>();
-
-/* ------------------------------------------------------------------ *
- * Health, Metrics & System Health
- * ------------------------------------------------------------------ */
-
-apiRouter.get('/health', wrap(async (_req: Request, res: Response) => {
-  const ping = await store.pingDatabase();
-  const database = ping.ok ? 'up' : 'down';
-  res.status(database === 'up' ? 200 : 503).json({
-    status: database === 'up' ? 'ok' : 'degraded',
-    mode: MODE,
-    checks: { database },
-    adminAuthRequired: ADMIN_AUTH_REQUIRED,
-    plan: 'free',
-  });
-}));
-
-apiRouter.get('/metrics', (_req: Request, res: Response) => {
-  res.type('text/plain; version=0.0.4').send(metricsText());
-});
-
-apiRouter.get(
-  '/admin/system-health',
-  requireUser,
-  wrap(async (_req: Request, res: Response) => {
-    const ping = await store.pingDatabase();
-    const faqCount = await store.countFaqs();
-    const report = telemetry.getSnapshot({
-      dbConnected: ping.ok,
-      dbPingLatencyMs: ping.ok ? ping.latencyMs : null,
-      isLive: LIVE,
-      faqCount,
-      activeSseCount: subscriberCount(),
-    });
-    res.status(report.status === 'unhealthy' ? 503 : 200).json(report);
-  }),
-);
-
-apiRouter.get(
-  '/health/system',
-  wrap(async (_req: Request, res: Response) => {
-    const ping = await store.pingDatabase();
-    const faqCount = await store.countFaqs();
-    const report = telemetry.getSnapshot({
-      dbConnected: ping.ok,
-      dbPingLatencyMs: ping.ok ? ping.latencyMs : null,
-      isLive: LIVE,
-      faqCount,
-      activeSseCount: subscriberCount(),
-    });
-    res.status(report.status === 'unhealthy' ? 503 : 200).json(report);
-  }),
-);
-
-// Auth router mounted on /api/auth and /api/v1/auth
-apiRouter.use('/auth', authRouter);
-
-// Admin SSE stream
-apiRouter.get('/admin/events', requireUser, (req: Request, res: Response) => {
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  res.write('retry: 3000\n\n');
-
-  const unsubscribe = subscribe(res);
-  const ping = setInterval(() => {
-    try {
-      res.write(': ping\n\n');
-    } catch {
-      /* cleanup below handles removal */
-    }
-  }, 25_000);
-
-  req.on('close', () => {
-    clearInterval(ping);
-    unsubscribe();
-  });
-});
-
-/* ------------------------------------------------------------------ *
- * Public FAQs
- * ------------------------------------------------------------------ */
-
-apiRouter.get('/faqs', apiLimiter, wrap(async (_req, res) => {
-  res.json(await store.listFaqs());
-}));
-
-/* ------------------------------------------------------------------ *
- * Customer conversations
- * ------------------------------------------------------------------ */
-
-apiRouter.post('/conversations', writeLimiter, wrap(async (req, res) => {
-  // Free-plan guard: new conversations stop at the monthly cap; existing
-  // threads and human hand-offs stay available.
-  if (METERING_ENABLED) {
-    const { start } = currentMonthWindow();
-    const used = await store.countConversationsSince(start);
-    const hit = conversationsLimitReached(used);
-    if (hit) {
-      telemetry.recordPlanLimitRejection('conversations');
-      res.setHeader('Retry-After', String(Math.max(1, 3600)));
-      res.status(429).json({ error: limitMessage(hit) });
-      return;
-    }
-  }
-
-  const body = asRecord(req.body);
-
-  const customer = readOptionalString(body.customer, MAX_CUSTOMER);
-  if (customer === null) {
-    res.status(400).json({ error: `customer must be at most ${MAX_CUSTOMER} characters` });
-    return;
-  }
-
-  const email = readOptionalString(body.email, MAX_EMAIL);
-  if (email === null) {
-    res.status(400).json({ error: `email must be at most ${MAX_EMAIL} characters` });
-    return;
-  }
-
-  const created = await store.createConversation({ customer, email });
-  emitConversation(created.conversation.id, created.conversation.status, created.conversation.title);
-  res.status(201).json({ conversation: created.conversation, accessToken: created.accessToken });
-}));
-
-apiRouter.get(
-  '/conversations/:id',
-  apiLimiter,
-  requireConversationAccess,
-  wrap(async (req, res) => {
-    const conversation = await store.getConversation(req.params.id);
-    if (!conversation) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-    res.json({ conversation, messages: await store.getMessages(conversation.id) });
-  }),
-);
-
-apiRouter.post(
-  '/conversations/:id/messages',
-  messageLimiter,
-  requireConversationAccess,
-  wrap(async (req, res) => {
-    const conversationId = req.params.id;
-    const body = asRecord(req.body);
-
-    const content = readRequiredString(body.content, MAX_CONTENT);
-    if (!content) {
-      res.status(400).json({
-        error: `content is required and must be at most ${MAX_CONTENT} characters`,
-      });
-      return;
-    }
-
-    let clientId: string | null = null;
-    if (body.clientId !== undefined && body.clientId !== null) {
-      const parsed = readRequiredString(body.clientId, MAX_CLIENT_ID);
-      if (!parsed) {
-        res.status(400).json({ error: `clientId must be at most ${MAX_CLIENT_ID} characters` });
-        return;
-      }
-      clientId = parsed;
-    }
-
-    const existing = await store.getConversation(conversationId);
-    if (!existing) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-
-    // Idempotent retry: the same clientId returns the current state unchanged.
-    if (clientId && (await store.hasIdempotencyKey(conversationId, clientId))) {
-      res.json({ conversation: existing, messages: await store.getMessages(conversationId) });
-      return;
-    }
-
-    if (busyConversations.has(conversationId)) {
-      res.status(409).json({
-        error: 'A reply is already being generated for this conversation. Please wait.',
-      });
-      return;
-    }
-
-    // Free-plan guard: assistant turns stop at the monthly cap. Storing the
-    // customer's message and reaching a human always stay available.
-    if (METERING_ENABLED && existing.status !== 'waiting') {
-      const { start } = currentMonthWindow();
-      const used = await store.countAssistantMessagesSince(start);
-      const hit = aiMessagesLimitReached(used);
-      if (hit) {
-        telemetry.recordPlanLimitRejection('ai_messages');
-        await store.addMessage({ conversationId, role: 'user', content });
-        await store.addMessage({
-          conversationId,
-          role: 'assistant',
-          content: limitMessage(hit),
-        });
-        await store.addMessage({
-          conversationId,
-          role: 'system',
-          content: 'Escalated to human queue: Monthly assistant message cap reached.',
-        });
-        const updated = await store.updateConversation(conversationId, {
-          status: 'waiting',
-          escalationReason: 'Monthly AI message cap reached',
-        });
-        emitConversation(conversationId, 'waiting', updated?.title ?? undefined);
-        res.status(429).json({
-          error: limitMessage(hit),
-          aiMessagesLimitReached: true,
-          conversation: updated,
-          messages: await store.getMessages(conversationId),
-        });
-        return;
-      }
-    }
-
-    busyConversations.add(conversationId);
-    try {
-      const row = await store.getConversationRow(conversationId);
-      const previousLowStreak = Number(row?.low_confidence_streak ?? 0);
-      const previousUnresolvedStreak = Number(row?.unresolved_streak ?? 0);
-      const previousIntent: Intent | null = existing.intent ?? null;
-      const wasWaiting = existing.status === 'waiting';
-      const wasResolved = existing.status === 'resolved';
-
-      /**
-       * A human can resolve, escalate or reply while the assistant turn is still
-       * running (live turns may take up to 30s). Their status decision must win:
-       * we never silently re-queue a conversation a person just closed.
-       */
-      const humanTookOver = async () => {
-        const latest = await store.getConversationRow(conversationId);
-        return latest !== null && latest.status !== existing.status;
-      };
-
-      const history: TurnHistoryItem[] = (await store.getMessages(conversationId))
-        .filter((message) => message.role !== 'system')
-        .map((message) => ({ role: message.role, content: message.content }));
-
-      await store.addMessage({ conversationId, role: 'user', content });
-
-      if (clientId) await store.recordIdempotencyKey(conversationId, clientId);
-
-      /** Scripted tool events from this turn, e.g. an order lookup. */
-      let toolEvent: ToolEvent | null = null;
-
-      const basePatch: store.ConversationPatch = {};
-      if (existing.title === 'New conversation') {
-        basePatch.title = content.length > 60 ? `${content.slice(0, 59)}\u2026` : content;
-      }
-      if (wasResolved) {
-        basePatch.status = 'open';
-        basePatch.escalationReason = null;
-        await store.addMessage({
-          conversationId,
-          role: 'system',
-          content: 'Customer reopened this conversation after it was marked resolved.',
-        });
-      }
-
-      // Waiting conversations are owned by the human queue: store the message,
-      // never let the assistant answer on top of a human hand-off.
-      if (wasWaiting) {
-        await store.updateConversation(conversationId, basePatch);
-        const conversation = await store.getConversation(conversationId);
-        emitConversation(conversationId, conversation?.status ?? 'waiting', conversation?.title ?? undefined);
-        res.json({ conversation, messages: await store.getMessages(conversationId) });
-        return;
-      }
-
-      // Optional artificial latency. Off by default; useful for exercising the
-      // loading and hand-off states locally, and for deterministic tests.
-      const turnDelayMs = Number(process.env.RELAY_TURN_DELAY_MS ?? 0);
-      if (Number.isFinite(turnDelayMs) && turnDelayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, Math.min(turnDelayMs, 30_000)));
-      }
-
-      let turn: AgentTurnResult;
-      const aiStart = process.hrtime.bigint();
-      try {
-        if (LIVE) {
-          turn = await generateLiveTurn({
-            conversationId,
-            customer: existing.customer,
-            userText: content,
-            history,
-            faqs: await store.listFaqs(),
-            previousIntent,
-          });
-        } else {
-          turn = generateDemoTurn({
-            userText: content,
-            faqs: await store.listFaqs(),
-            previousIntent,
-          });
-        }
-        const aiDurationMs = Number(process.hrtime.bigint() - aiStart) / 1e6;
-        telemetry.recordAiTurn(true, aiDurationMs);
-        telemetry.recordKbSearch(turn.sources.length > 0);
-      } catch (error) {
-        const aiDurationMs = Number(process.hrtime.bigint() - aiStart) / 1e6;
-        telemetry.recordAiTurn(false, aiDurationMs);
-        telemetry.recordHandoff('assistant_service_unavailable');
-        console.error('[relay] assistant failure:', error);
-        await store.addMessage({
-          conversationId,
-          role: 'assistant',
-          content: handoffMessage('service_unavailable'),
-        });
-        const takenOver = await humanTookOver();
-        if (!takenOver) {
-          await store.addMessage({
-            conversationId,
-            role: 'system',
-            content: 'Escalated to a human agent: assistant service unavailable',
-          });
-        }
-        await store.updateConversation(conversationId, {
-          ...basePatch,
-          intent: previousIntent ?? 'general',
-          ...(takenOver
-            ? {}
-            : {
-                status: 'waiting' as const,
-                escalationReason: 'Assistant service unavailable',
-              }),
-          lowConfidenceStreak: 0,
-          unresolvedStreak: 0,
-        });
-        const conversation = await store.getConversation(conversationId);
-        emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-        res.json({ conversation, messages: await store.getMessages(conversationId) });
-        return;
-      }
-
-      await store.addMessage({
-        conversationId,
-        role: 'assistant',
-        content: turn.reply,
-        provider: turn.provider,
-        sources: turn.sources,
-        ...(turn.toolCall ? { tool: { name: turn.toolCall.name, args: turn.toolCall.args } } : {}),
-      });
-
-      if (turn.toolCall) {
-        toolEvent = { name: turn.toolCall.name, args: turn.toolCall.args };
-      }
-
-      const lowStreak = turn.confidence === 'low' ? previousLowStreak + 1 : 0;
-      const reportedUnresolved = /\b(still (?:not|does(?:n['’]?t| not)|is(?:n['’]?t| not)|can(?:not|'t))|(?:did(?:n['’]?t| not)|does(?:n['’]?t| not)) (?:work|help|fix)|not (?:working|helpful|resolved|fixed)|same (?:problem|issue|error)|tried (?:that|this|everything)|no (?:luck|change))\b/i.test(content);
-      // A successful order lookup is a resolved turn by construction.
-      const orderLookupResolved = Boolean(turn.toolCall);
-      // In demo mode a missing citation means the knowledge base had no answer.
-      // In live mode `sources` is only the retrieval context handed to the model,
-      // so it says nothing about whether the model actually resolved the request;
-      // there we rely on the customer's own words and the model's escalate flag.
-      const unresolvedSignal = !orderLookupResolved
-        && (reportedUnresolved || (!LIVE && turn.sources.length === 0));
-      const unresolvedStreak = unresolvedSignal ? previousUnresolvedStreak + 1 : 0;
-
-      let escalate = turn.escalate;
-      let escalationReason = turn.escalationReason;
-
-      if (!escalate && (lowStreak >= 2 || unresolvedStreak >= 2)) {
-        escalate = true;
-        escalationReason = 'Two consecutive unresolved messages or unsuccessful troubleshooting attempts';
-        await store.addMessage({
-          conversationId,
-          role: 'assistant',
-          content: handoffMessage('repeated_unresolved'),
-          provider: turn.provider,
-        });
-      }
-
-      const takenOver = await humanTookOver();
-      if (takenOver) {
-        console.log(
-          `[relay] human changed the status of ${conversationId} during an assistant turn; keeping their decision`,
-        );
-      } else if (escalate) {
-        telemetry.recordHandoff(escalationReason ?? 'unresolved request');
-        await store.addMessage({
-          conversationId,
-          role: 'system',
-          content: `Escalated to a human agent: ${escalationReason ?? 'unresolved request'}`,
-        });
-      }
-
-      const patch: store.ConversationPatch = {
-        ...basePatch,
-        intent: turn.intent,
-        lowConfidenceStreak: escalate ? 0 : lowStreak,
-        unresolvedStreak: escalate ? 0 : unresolvedStreak,
-      };
-      if (takenOver) {
-        // Drop any status/escalation change this turn wanted to make.
-        delete patch.status;
-        delete patch.escalationReason;
-      } else if (escalate) {
-        patch.status = 'waiting';
-        patch.escalationReason = escalationReason ?? 'unresolved request';
-      } else if (wasResolved) {
-        patch.status = 'open';
-        patch.escalationReason = null;
-      }
-      await store.updateConversation(conversationId, patch);
-
-      const conversation = await store.getConversation(conversationId);
-      emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-      res.json({ conversation, messages: await store.getMessages(conversationId), ...(toolEvent ? { toolEvent } : {}) });
-    } finally {
-      busyConversations.delete(conversationId);
-    }
-  }),
-);
-
-apiRouter.post(
-  '/conversations/:id/escalate',
-  writeLimiter,
-  requireConversationAccess,
-  wrap(async (req, res) => {
-    const conversationId = req.params.id;
-    const existing = await store.getConversation(conversationId);
-    if (!existing) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-
-    const body = asRecord(req.body);
-    const reason = readOptionalString(body.reason, MAX_REASON);
-    if (reason === null) {
-      res.status(400).json({ error: `reason must be at most ${MAX_REASON} characters` });
-      return;
-    }
-
-    const finalReason = reason && reason.length > 0 ? reason : 'Customer requested a human agent';
-    telemetry.recordHandoff(finalReason);
-
-    await store.addMessage({
-      conversationId,
-      role: 'system',
-      content: `Escalated to a human agent: ${finalReason}`,
-    });
-
-    const conversation = await store.updateConversation(conversationId, {
-      status: 'waiting',
-      escalationReason: finalReason,
-      lowConfidenceStreak: 0,
-      unresolvedStreak: 0,
-    });
-
-    emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-    res.json(conversation);
-  }),
-);
-
-apiRouter.post(
-  '/conversations/:id/rating',
-  writeLimiter,
-  requireConversationAccess,
-  wrap(async (req, res) => {
-    const conversationId = req.params.id;
-    const existing = await store.getConversation(conversationId);
-    if (!existing) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-
-    const body = asRecord(req.body);
-    const score = body.score;
-    if (typeof score !== 'number' || !Number.isInteger(score) || score < 1 || score > 5) {
-      res.status(400).json({ error: 'score must be an integer between 1 and 5' });
-      return;
-    }
-
-    if (existing.rating !== null) {
-      res.status(409).json({ error: 'This conversation has already been rated.' });
-      return;
-    }
-
-    const conversation = await store.updateConversation(conversationId, { rating: score });
-    emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-    res.json(conversation);
-  }),
-);
-
-apiRouter.post(
-  '/conversations/:id/messages/:messageId/feedback',
-  writeLimiter,
-  requireConversationAccess,
-  wrap(async (req, res) => {
-    const { id: conversationId, messageId } = req.params;
-    const body = asRecord(req.body);
-    const helpful = Boolean(body.helpful);
-    const validReasons = ['incorrect', 'didnt_answer', 'missing_info', 'need_human'];
-    const reason = typeof body.reason === 'string' && validReasons.includes(body.reason)
-      ? (body.reason as 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human')
-      : null;
-    const comment = readOptionalString(body.comment, 500) ?? null;
-
-    const updatedMessage = await store.recordMessageFeedback(conversationId, messageId, {
-      helpful,
-      reason,
-      comment,
-    });
-
-    if (!updatedMessage) {
-      res.status(404).json({ error: 'Message not found' });
-      return;
-    }
-
-    if (!helpful && reason === 'need_human') {
-      telemetry.recordHandoff('Customer requested human support via message feedback');
-      const existing = await store.getConversation(conversationId);
-      if (existing && existing.status !== 'waiting') {
-        await store.addMessage({
-          conversationId,
-          role: 'system',
-          content: 'Escalated to human agent: Customer flagged answer as needing a human.',
-        });
-        const updatedConv = await store.updateConversation(conversationId, {
-          status: 'waiting',
-          escalationReason: 'Customer requested human support via message feedback',
-        });
-        emitConversation(conversationId, updatedConv?.status ?? null, updatedConv?.title ?? undefined);
-      }
-    }
-
-    res.json({ ok: true, message: updatedMessage });
-  }),
-);
-
-/* ------------------------------------------------------------------ *
- * Admin - conversations
- * ------------------------------------------------------------------ */
-
-apiRouter.get('/admin/conversations', apiLimiter, requireUser, wrap(async (req, res) => {
-  // Pagination: newest first, bounded page size.
-  const limitRaw = Number(req.query.limit);
-  const offsetRaw = Number(req.query.offset);
-  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 100;
-  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
-  const result = await store.listConversations({ limit, offset });
-  res.json({
-    items: result.items,
-    total: result.total,
-    limit,
-    offset,
-  });
-}));
-
-apiRouter.get(
-  '/admin/conversations/:id',
-  apiLimiter,
-  requireUser,
-  wrap(async (req, res) => {
-    const conversation = await store.getConversation(req.params.id);
-    if (!conversation) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-    res.json({ conversation, messages: await store.getMessages(conversation.id) });
-  }),
-);
-
-apiRouter.get('/admin/stats', apiLimiter, requireUser, wrap(async (req, res) => {
-  const raw = req.query.days;
-  let days = 7;
-  if (raw !== undefined) {
-    const parsed = Number(raw);
-    if (parsed !== 7 && parsed !== 30) {
-      res.status(400).json({ error: 'days must be 7 or 30' });
-      return;
-    }
-    days = parsed;
-  }
-
-  res.json({ ...(await store.getStats(days)), mode: MODE });
-}));
-
-/** Free-plan usage for the current calendar month (admin visibility). */
-apiRouter.get('/admin/usage', apiLimiter, requireUser, wrap(async (_req, res) => {
-  const { start } = currentMonthWindow();
-  res.json(await getUsageSummary({
-    conversations: () => store.countConversationsSince(start),
-    aiMessages: () => store.countAssistantMessagesSince(start),
-  }));
-}));
-
-apiRouter.post(
-  '/admin/conversations/:id/reply',
-  writeLimiter,
-  requireUser,
-  wrap(async (req, res) => {
-    const conversationId = req.params.id;
-    const existing = await store.getConversation(conversationId);
-    if (!existing) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-
-    const body = asRecord(req.body);
-    const content = readRequiredString(body.content, MAX_CONTENT);
-    if (!content) {
-      res.status(400).json({
-        error: `content is required and must be at most ${MAX_CONTENT} characters`,
-      });
-      return;
-    }
-
-    // Status is intentionally untouched: an escalated conversation stays in the
-    // waiting queue until a human explicitly resolves it.
-    const message = await store.addMessage({
-      conversationId,
-      role: 'human',
-      content,
-      provider: 'human',
-    });
-
-    const afterReply = await store.getConversation(conversationId);
-    emitConversation(conversationId, afterReply?.status ?? null, afterReply?.title ?? undefined);
-    res.json(message);
-  }),
-);
-
-apiRouter.post(
-  '/admin/conversations/:id/resolve',
-  writeLimiter,
-  requireUser,
-  wrap(async (req, res) => {
-    const conversationId = req.params.id;
-    const existing = await store.getConversation(conversationId);
-    if (!existing) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-
-    await store.addMessage({
-      conversationId,
-      role: 'system',
-      content: 'Conversation marked as resolved by a human agent.',
-    });
-
-    const conversation = await store.updateConversation(conversationId, {
-      status: 'resolved',
-      escalationReason: null,
-      lowConfidenceStreak: 0,
-      unresolvedStreak: 0,
-    });
-
-    emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-    res.json(conversation);
-  }),
-);
-
-apiRouter.post(
-  '/admin/conversations/:id/assign',
-  writeLimiter,
-  requireUser,
-  wrap(async (req, res) => {
-    const conversationId = req.params.id;
-    const existing = await store.getConversation(conversationId);
-    if (!existing) {
-      res.status(404).json({ error: 'Conversation not found' });
-      return;
-    }
-
-    const body = asRecord(req.body);
-    const name = readOptionalString(body.name, MAX_ASSIGNEE);
-    if (name === null) {
-      res.status(400).json({ error: `name must be at most ${MAX_ASSIGNEE} characters` });
-      return;
-    }
-
-    const assignee = name && name.length > 0 ? name : DEFAULT_ASSIGNEE;
-    const conversation = await store.updateConversation(conversationId, { assignee });
-    emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-    res.json(conversation);
-  }),
-);
-
-/* ------------------------------------------------------------------ *
- * Admin - FAQs
- * ------------------------------------------------------------------ */
-
-apiRouter.post('/admin/faqs', writeLimiter, requireAdminRole, wrap(async (req, res) => {
-  const body = asRecord(req.body);
-
-  const title = readRequiredString(body.title, MAX_TITLE);
-  if (!title) {
-    res.status(400).json({ error: `title is required and must be at most ${MAX_TITLE} characters` });
-    return;
-  }
-
-  const answer = readRequiredString(body.answer, MAX_ANSWER);
-  if (!answer) {
-    res.status(400).json({ error: `answer is required and must be at most ${MAX_ANSWER} characters` });
-    return;
-  }
-
-  const category = parseIntent(body.category);
-  if (!category) {
-    res.status(400).json({ error: `category must be one of: ${INTENTS.join(', ')}` });
-    return;
-  }
-
-  const tags = parseTags(body.tags);
-  if (!tags) {
-    res.status(400).json({
-      error: `tags must be an array of at most ${MAX_TAGS} strings, each at most ${MAX_TAG_LENGTH} characters`,
-    });
-    return;
-  }
-
-  const created = await store.createFaq({ title, answer, category, tags });
-  clearFaqTermCache();
-  publish({ type: 'faq' });
-  res.status(201).json(created);
-}));
-
-apiRouter.patch('/admin/faqs/:id', writeLimiter, requireAdminRole, wrap(async (req, res) => {
-  const faqId = req.params.id;
-  if (!(await store.getFaq(faqId))) {
-    res.status(404).json({ error: 'FAQ not found' });
-    return;
-  }
-
-  const body = asRecord(req.body);
-  const applied: Partial<store.FaqInput> = {};
-  let touched = false;
-
-  if (body.title !== undefined) {
-    const title = readRequiredString(body.title, MAX_TITLE);
-    if (!title) {
-      res.status(400).json({ error: `title must be at most ${MAX_TITLE} characters` });
-      return;
-    }
-    applied.title = title;
-    touched = true;
-  }
-
-  if (body.answer !== undefined) {
-    const answer = readRequiredString(body.answer, MAX_ANSWER);
-    if (!answer) {
-      res.status(400).json({ error: `answer must be at most ${MAX_ANSWER} characters` });
-      return;
-    }
-    applied.answer = answer;
-    touched = true;
-  }
-
-  if (body.category !== undefined) {
-    const category = parseIntent(body.category);
-    if (!category) {
-      res.status(400).json({ error: `category must be one of: ${INTENTS.join(', ')}` });
-      return;
-    }
-    applied.category = category;
-    touched = true;
-  }
-
-  if (body.tags !== undefined) {
-    const tags = parseTags(body.tags);
-    if (!tags) {
-      res.status(400).json({
-        error: `tags must be an array of at most ${MAX_TAGS} strings, each at most ${MAX_TAG_LENGTH} characters`,
-      });
-      return;
-    }
-    applied.tags = tags;
-    touched = true;
-  }
-
-  if (!touched) {
-    res.status(400).json({ error: 'No updatable fields were provided' });
-    return;
-  }
-
-  const updated = await store.updateFaq(faqId, applied);
-  if (!updated) {
-    res.status(404).json({ error: 'FAQ not found' });
-    return;
-  }
-  clearFaqTermCache();
-  publish({ type: 'faq' });
-  res.json(updated);
-}));
-
-apiRouter.get('/admin/knowledge-gaps', apiLimiter, requireUser, wrap(async (_req, res) => {
-  res.json({ items: await store.listKnowledgeGaps() });
-}));
-
-apiRouter.post('/admin/knowledge-gaps/:id/resolve', writeLimiter, requireUser, wrap(async (req, res) => {
-  const resolved = await store.resolveKnowledgeGap(req.params.id);
-  if (!resolved) {
-    res.status(404).json({ error: 'Knowledge gap not found' });
-    return;
-  }
-  res.json({ ok: true });
-}));
-
-apiRouter.post('/admin/onboarding/sample-knowledge', writeLimiter, requireAdminRole, wrap(async (_req, res) => {
-  const faqs = await store.seedSampleKnowledge();
-  clearFaqTermCache();
-  publish({ type: 'faq' });
-  res.json({ items: faqs });
-}));
 
 // Auth: attach user session before API routing
 app.use(auth.attachUser);
+// Cookie sessions are ambient credentials: state-changing requests on them
+// must carry the per-session CSRF token (header-token auth is exempt).
+app.use(auth.requireCsrf);
 
 // Versioned v1 API with standard envelope: { success, data | error }
 const v1 = express.Router();
 v1.use(envelope);
 v1.use(apiRouter);
+// Envelope v1 misses too, so the versioned contract stays consistent.
+v1.use((_req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found' });
+});
 app.use('/api/v1', v1);
 
 // Legacy unversioned API without envelope
@@ -1180,13 +134,20 @@ app.use('/api', apiRouter);
  * API 404 + static frontend + SPA fallback
  * ------------------------------------------------------------------ */
 
-app.use(['/api', '/api/v1'], apiLimiter, (_req: Request, res: Response) => {
+app.use('/api', (_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-const DIST_DIR = fs.existsSync(path.join(store.PROJECT_ROOT, 'dist'))
-  ? path.join(store.PROJECT_ROOT, 'dist')
-  : path.resolve(store.PROJECT_ROOT, '../frontend/dist');
+const DIST_CANDIDATES = [
+  // Production layouts (Docker, compose): the frontend build sits next to
+  // the backend folder, never inside the backend's own tsc output.
+  path.resolve(store.PROJECT_ROOT, '../frontend/dist'),
+  // Legacy single-folder layout: a dist/ with an index.html directly under
+  // the project root (never the backend's compiled server output).
+  path.join(store.PROJECT_ROOT, 'dist'),
+];
+const DIST_DIR =
+  DIST_CANDIDATES.find((dir) => fs.existsSync(path.join(dir, 'index.html'))) ?? DIST_CANDIDATES[1];
 const INDEX_FILE = path.join(DIST_DIR, 'index.html');
 
 if (fs.existsSync(DIST_DIR)) {
@@ -1230,8 +191,8 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
 
-  console.error('[relay] unhandled error:', error);
   const status = err?.status ?? err?.statusCode ?? 500;
+  void reportError('express', error, { path: _req.path, method: _req.method, status });
   res.status(status >= 400 && status < 600 ? status : 500).json({ error: 'Internal server error' });
 });
 
@@ -1249,9 +210,12 @@ let readyPromise: Promise<void> | null = null;
 
 export function ensureReady(): Promise<void> {
   readyPromise ??= (async () => {
+    initMonitoring();
+    initProcessErrorHandlers();
     await store.connectToDatabase();
     await store.seedDatabase();
     await auth.initAuthCollections(store.getDb());
+    await rateLimiters.initRateLimitCollections(store.getDb());
     await auth.bootstrapAdminFromEnv();
   })().catch((error: unknown) => {
     readyPromise = null;
@@ -1261,10 +225,15 @@ export function ensureReady(): Promise<void> {
 }
 
 export async function startServer(port: number = PORT, host: string = HOST) {
+  initMonitoring();
+  initProcessErrorHandlers();
   await store.connectToDatabase();
   await store.seedDatabase();
   await auth.initAuthCollections(store.getDb());
+  await rateLimiters.initRateLimitCollections(store.getDb());
   await auth.bootstrapAdminFromEnv();
+  // Cross-instance realtime (replica sets only); serverless stays in-process.
+  await startEventBridge(store.getDb());
 
   const server = app.listen(port, host, () => {
     console.log(`[relay] Relay Store support backend listening on http://${host}:${port}`);

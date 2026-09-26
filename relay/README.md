@@ -33,7 +33,7 @@ npm run build  # Compiles client into frontend/dist
 cd backend
 npm install
 npm run dev    # Starts API server on http://127.0.0.1:3000 with tsx watch
-npm run test   # Runs 33 automated tests
+npm run test   # Runs 37 automated tests
 ```
 
 From the root `relay/` folder:
@@ -59,9 +59,10 @@ usage is visible to the team in **Settings → Free plan — this month** and vi
 
 ### Free deployment in ~15 minutes (Vercel + Atlas)
 
-The repo is Vercel-ready: `api/index.ts` runs the Express API as a serverless
-function, the Vite build ships as static assets, and `vercel.json` wires the
-routing. See **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**. Everything runs on
+The repo is Vercel-ready: `relay/api/index.ts` runs the Express API as a
+serverless function (it must stay in the root-level `api/` directory —
+Vercel only discovers functions there), the Vite build ships as static
+assets, and `vercel.json` wires the routing. See **[DEPLOY-VERCEL.md](./DEPLOY-VERCEL.md)**. Everything runs on
 free tiers — total cost $0, plus your own LLM key if you enable live mode.
 
 Prefer a VM? See **[DEPLOY-OCI.md](./DEPLOY-OCI.md)** (any Ubuntu VM works).
@@ -74,9 +75,9 @@ docker compose up --build
 
 ### CI
 
-GitHub Actions (`.github/workflows/ci.yml`) typechecks, builds, and runs the full integration suite against a real MongoDB replica set on every pull request.
+GitHub Actions (`.github/workflows/ci.yml`) lints, typechecks, audits dependencies, builds, and runs the full integration suite plus the Playwright pilot flow (real Chromium against a real server + MongoDB replica set) on every pull request. A separate job builds the production Docker image and smoke-tests its health check; `.github/workflows/backup.yml` runs scheduled MongoDB backups and a monthly restore rehearsal when `BACKUP_ENABLED=true`.
 
-For development, `npm run dev` runs the backend on 3000 and Vite on 5173. `npm test` runs isolated integration tests; `npm run typecheck` checks frontend and backend.
+For development, `npm run dev` runs the backend on 3000 and Vite on 5173. `npm test` runs isolated integration tests; `npm run test:e2e` runs the browser pilot flow (needs MongoDB and `relay/frontend/dist` built); `npm run test:coverage` enforces a coverage floor (line 45% / branch 50% over the in-process modules — the spawned server process is not merged, so raise or lower the floor in `package.json` as it grows); `npm run lint` runs ESLint with zero warnings (`npm run format` applies Prettier); `npm run typecheck` checks frontend and backend; `npm run test:visual` runs the opt-in Playwright screenshot suite (`-- --update-snapshots` generates platform baselines).
 
 ## Accounts, sessions and RBAC
 
@@ -94,6 +95,7 @@ For development, `npm run dev` runs the backend on 3000 and Vite on 5173. `npm t
 - `GET /api/admin/usage` returns free-plan usage for the current month.
 - `GET /api/admin/conversations?limit=&offset=` returns `{ items, total, limit, offset }` (default/limit max 100/200).
 - `GET /api/admin/events` is a Server-Sent Events stream (session-authenticated) broadcasting workspace events; the workspace UI subscribes and refreshes instantly, with polling as fallback.
+- `GET /api/openapi.json` serves the OpenAPI 3.1 reference for all 35 paths (also at `/api/v1/openapi.json`, enveloped).
 
 ## Email notifications
 
@@ -105,7 +107,7 @@ The frontend is an installable PWA: `public/manifest.webmanifest` plus an offlin
 
 ## Demo versus live
 
-The default demo is fully functional offline: FAQ retrieval, multi-turn context, handoff rules, human replies, ratings, editable knowledge and persistence all work without a key. It is **not** a live language model. The dashboard clearly marks the 30 seeded conversations and 15 sample policies as demonstration data.
+The default demo is fully functional offline: FAQ retrieval, multi-turn context, handoff rules, human replies, ratings, editable knowledge and persistence all work without a key. It is **not** a live language model. Demo content is opt-in via `SEED_DEMO=true`, which seeds 31 conversations and 15 sample policies; the dashboard marks them as demonstration data. Leave it unset and the workspace starts empty.
 
 To enable CodeBuddy, copy `.env.example` to `.env` in this folder and configure server-side values:
 
@@ -116,9 +118,9 @@ ADMIN_TOKEN=your-own-long-random-admin-secret
 SEED_DEMO=false
 ```
 
-Restart the server. The admin dashboard will request the admin token, or you can provision real accounts with `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` and sign in at the login screen. Replace the fictional FAQs with your actual policies before real use. No credentials are included or sent to the browser beyond the httpOnly session cookie; account passwords are stored only as scrypt hashes.
+Restart the server. The admin dashboard will request the admin token, or you can provision real accounts with `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` and sign in at the login screen. Live mode starts with an empty knowledge base — add your own policies, or press **Use sample policies** in the admin workspace for a starting point to edit. No credentials are included or sent to the browser beyond the httpOnly session cookie; account passwords are stored only as scrypt hashes.
 
-Optional variables: `CODEBUDDY_AUTH_TOKEN`, `CODEBUDDY_MODEL`, `CODEBUDDY_CODE_PATH`, `DATA_DIR`, `PORT`, `RELAY_TURN_DELAY_MS`, `ALLOWED_HOSTS`, `TRUST_PROXY`, `FREE_CONVERSATIONS_LIMIT` (default 300, `0` = unlimited), `FREE_AI_MESSAGES_LIMIT` (default 1000, `0` = unlimited). The actual authenticated model response must be verified with your own valid credentials.
+Optional variables: `CODEBUDDY_AUTH_TOKEN`, `CODEBUDDY_MODEL`, `CODEBUDDY_CODE_PATH`, `DATA_DIR`, `PORT`, `RELAY_TURN_DELAY_MS`, `ALLOWED_HOSTS`, `TRUST_PROXY`, `FREE_CONVERSATIONS_LIMIT` (default 300, `0` = unlimited), `FREE_AI_MESSAGES_LIMIT` (default 1000, `0` = unlimited), `GOOGLE_CLIENT_ID` (required to enable Google Sign-In — the endpoint refuses tokens when unset), `ALLOW_FIRST_USER_ADMIN` (opt-in; when unset the first self-service sign-up becomes an `agent`, not an admin — use `BOOTSTRAP_ADMIN_*` to create the initial admin), `ERROR_WEBHOOK_URL` (optional dependency-free alert sink; logs a structured line and POSTs JSON on 5xx and unhandled errors), `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` / `SENTRY_TRACES_SAMPLE_RATE` (optional managed error tracking + alert routing; when set, Sentry owns uncaught handlers), `ALLOW_AUTH_DEBUG_CODE` (local-development only: returns email OTP/magic-link secrets, and only from loopback). The actual authenticated model response must be verified with your own valid credentials.
 
 ## Features
 
@@ -165,9 +167,15 @@ Add HTTPS, proper user accounts/SSO and role-based access, audit and retention p
 - `src/service-api.ts`, `src/service-types.ts`: typed client contract and session handling.
 - `server/index.ts`: API, access control, free-plan guards, handoffs and static hosting.
 - `server/plan.ts`: free-tier limits, month window and usage summary.
+- `server/index.ts`: composition root — middleware, router mounts, static/SPA serving and startup.
+- `server/config.ts`: environment config, live-mode guards and the Host/Origin guard.
+- `server/validation.ts`: bounded request-body validators.
+- `server/routes/system.ts`, `routes/customer.ts`, `routes/admin.ts`: the route groups.
 - `server/auth.ts`, `server/auth-routes.ts`: accounts, sessions, RBAC and audit.
-- `server/events.ts`, `server/notify.ts`: realtime event bus and email notifications.
+- `server/events.ts`, `server/notify.ts`: realtime event bus (cross-instance via a Mongo change stream, in-process fallback) and email notifications.
 - `server/logger.ts`, `server/http.ts`: structured logging, request IDs, envelopes, metrics.
+- `server/monitoring.ts`: optional error-tracking/alerting webhook.
+- `server/migrations.ts`: versioned migrations + `$jsonSchema` validators.
 - `server/db.ts`: MongoDB repositories, indexes, demo seed and statistics.
 - `server/knowledge.ts`: sample FAQs, ranking and intent rules.
 - `server/orders.ts`: mocked order catalogue backing the lookup tool call.

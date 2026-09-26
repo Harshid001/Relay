@@ -1,0 +1,14 @@
+# Keep the build context small and secret-free. Runtime secrets travel via
+# --env-file / compose environment, never via COPY.
+node_modules/
+dist/
+data/
+artifacts/
+backups/
+coverage/
+test-results/
+playwright-report/
+.env
+.env.*
+!*.example
+*.tsbuildinfo

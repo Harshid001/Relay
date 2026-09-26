@@ -17,6 +17,23 @@ import type {
 const ADMIN_TOKEN_KEY = 'relay-admin-token';
 export const CUSTOMER_STORE_KEY = 'relay-customer-session';
 
+/**
+ * Per-session CSRF token. The backend issues it at login (and via GET
+ * /auth/me) and requires it as `x-csrf-token` on state-changing requests
+ * authenticated by the ambient cookie session. Kept in memory only — never
+ * persisted — so a stolen localStorage/sessionStorage dump cannot mint
+ * forged cross-site requests.
+ */
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token && token.length > 0 ? token : null;
+}
+
+export function clearCsrfToken(): void {
+  csrfToken = null;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -59,6 +76,10 @@ async function request<T>(path: string, init: RequestInit = {}, ownerToken?: str
     if (admin) headers['x-admin-token'] = admin;
   }
   if (ownerToken) headers['x-conversation-token'] = ownerToken;
+  const method = (init.method ?? 'GET').toUpperCase();
+  if (csrfToken && (method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE')) {
+    headers['x-csrf-token'] = csrfToken;
+  }
 
   let response: Response;
   try {
@@ -163,24 +184,48 @@ export interface AuthConfig {
   emailVerification: boolean;
 }
 
+export interface SessionResponse {
+  user: SessionUser | null;
+  csrfToken?: string | null;
+}
+
 export const authApi = {
-  me: () => request<{ user: SessionUser | null }>('/api/auth/me'),
+  me: async () => {
+    const response = await request<SessionResponse>('/api/auth/me');
+    setCsrfToken(response.csrfToken ?? null);
+    return response;
+  },
 
   getConfig: () => request<AuthConfig>('/api/auth/config'),
 
-  login: (email: string, password: string) =>
-    post<{ user: SessionUser }>('/api/auth/login', { email, password }),
+  login: async (email: string, password: string) => {
+    const response = await post<SessionResponse>('/api/auth/login', { email, password });
+    setCsrfToken(response.csrfToken ?? null);
+    return response;
+  },
 
   sendEmailCode: (email: string) =>
     post<{ ok: true; message: string; debugCode?: string }>('/api/auth/email/send-code', { email }),
 
-  verifyEmail: (email: string, code?: string, token?: string) =>
-    post<{ user: SessionUser }>('/api/auth/email/verify', { email, code, token }),
+  verifyEmail: async (email: string, code?: string, token?: string) => {
+    const response = await post<SessionResponse>('/api/auth/email/verify', { email, code, token });
+    setCsrfToken(response.csrfToken ?? null);
+    return response;
+  },
 
-  loginWithGoogle: (credential: string) =>
-    post<{ user: SessionUser }>('/api/auth/google', { credential }),
+  loginWithGoogle: async (credential: string) => {
+    const response = await post<SessionResponse>('/api/auth/google', { credential });
+    setCsrfToken(response.csrfToken ?? null);
+    return response;
+  },
 
-  logout: () => post<{ ok: true }>('/api/auth/logout'),
+  logout: async () => {
+    try {
+      return await post<{ ok: true }>('/api/auth/logout');
+    } finally {
+      clearCsrfToken();
+    }
+  },
 
   listUsers: () => request<ManagedUser[]>('/api/auth/users'),
 

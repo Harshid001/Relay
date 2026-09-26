@@ -41,6 +41,7 @@ export interface UserDoc {
 export interface SessionDoc {
   _id: string; // sha256 of the raw token
   user_id: string;
+  csrf_token: string; // per-session anti-CSRF token (see requireCsrf)
   created_at: Date;
   expires_at: Date;
   last_seen_at: Date;
@@ -56,7 +57,12 @@ export interface AuditEventDoc {
   target: string;
   details?: Record<string, unknown>;
   request_id: string | null;
+  /** TTL anchor: audit trail is retained AUDIT_RETENTION_DAYS, then pruned. */
+  expires_at: Date;
 }
+
+/** Audit trail retention. Long enough for annual reviews, bounded by TTL. */
+export const AUDIT_RETENTION_DAYS = 365;
 
 export interface EmailVerificationDoc {
   _id: string;
@@ -111,6 +117,12 @@ export async function ensureAuthIndexes(db: Db): Promise<void> {
     ),
     db.collection<AuditEventDoc>('audit_events').createIndex({ at: -1 }),
     db.collection<AuditEventDoc>('audit_events').createIndex({ actor_id: 1, at: -1 }),
+    // Retention: `at` is an ISO string (TTL needs a Date), so expiry hangs
+    // off a dedicated anchor set at insert time.
+    db.collection<AuditEventDoc>('audit_events').createIndex(
+      { expires_at: 1 },
+      { expireAfterSeconds: 0 },
+    ),
     db.collection<EmailVerificationDoc>('email_verifications').createIndex(
       { expires_at: 1 },
       { expireAfterSeconds: 0 },
@@ -175,19 +187,24 @@ function implicitAdmin(): SessionUser {
   };
 }
 
-export async function createSession(userId: string, userAgent: string | null): Promise<string> {
+export async function createSession(
+  userId: string,
+  userAgent: string | null,
+): Promise<{ token: string; csrfToken: string }> {
   const token = crypto.randomBytes(32).toString('base64url');
   const tokenHash = crypto.createHash('sha256').update(token, 'utf8').digest('hex');
+  const csrfToken = crypto.randomBytes(32).toString('base64url');
   const now = new Date();
   await sessions().insertOne({
     _id: tokenHash,
     user_id: userId,
+    csrf_token: csrfToken,
     created_at: now,
     expires_at: new Date(now.getTime() + SESSION_TTL_SECONDS * 1000),
     last_seen_at: now,
     user_agent: userAgent?.slice(0, 200) ?? null,
   });
-  return token;
+  return { token, csrfToken };
 }
 
 export async function destroySession(token: string): Promise<void> {
@@ -220,6 +237,11 @@ function sessionTokenFromRequest(req: Request): string | null {
   return null;
 }
 
+/** Public accessor for the raw session token in the request cookies. */
+export function sessionTokenFromCookie(req: Request): string | null {
+  return sessionTokenFromRequest(req);
+}
+
 function requestIsSecure(req: Request): boolean {
   if (req.secure) return true;
   if (process.env.TRUST_PROXY === '1' && req.get('x-forwarded-proto') === 'https') return true;
@@ -249,6 +271,12 @@ export function clearSessionCookie(res: Response): void {
 declare module 'express-serve-static-core' {
   interface Request {
     user?: SessionUser;
+    /**
+     * How req.user was established. 'session' means the ambient cookie
+     * session (CSRF-able, so requireCsrf applies); the header-token paths
+     * carry explicit per-request secrets and are exempt.
+     */
+    authMethod?: 'session' | 'admin-token' | 'loopback';
   }
 }
 
@@ -294,6 +322,7 @@ export const attachUser: RequestHandler = (req, res, next) => {
       const user = await userForToken(token);
       if (user) {
         req.user = user;
+        req.authMethod = 'session';
         next();
         return;
       }
@@ -316,11 +345,19 @@ export const attachUser: RequestHandler = (req, res, next) => {
         const b = crypto.createHash('sha256').update(expected, 'utf8').digest();
         if (crypto.timingSafeEqual(a, b)) {
           req.user = implicitAdmin();
+          req.authMethod = 'admin-token';
         }
-      } else if (!expected && (path.startsWith('/api/admin') || path.startsWith('/api/v1/admin')) && isLoopbackRequest(req)) {
-        // Open demo mode (no ADMIN_TOKEN, no accounts): admin routes stay
-        // reachable on loopback only. Remote requests fail closed (401).
+      } else if (
+        !expected &&
+        process.env.CODEBUDDY_LIVE !== 'true' &&
+        (path.startsWith('/api/admin') || path.startsWith('/api/v1/admin')) &&
+        isLoopbackRequest(req)
+      ) {
+        // Open demo mode only (no ADMIN_TOKEN, no accounts, not live): admin
+        // routes stay reachable on loopback. Remote requests fail closed
+        // (401), and live mode never grants implicit admin.
         req.user = implicitAdmin();
+        req.authMethod = 'loopback';
       }
     }
     next();
@@ -350,6 +387,50 @@ export function requireRole(...roles: Role[]): RequestHandler {
     next();
   };
 }
+
+/** Returns the stored CSRF token for a raw session token, or null. */
+export async function sessionCsrfToken(rawToken: string): Promise<string | null> {
+  const tokenHash = crypto.createHash('sha256').update(rawToken, 'utf8').digest('hex');
+  const session = await sessions().findOne(
+    { _id: tokenHash },
+    { projection: { csrf_token: 1, expires_at: 1 } },
+  );
+  if (!session || session.expires_at.getTime() < Date.now()) return null;
+  return session.csrf_token ?? null;
+}
+
+const CSRF_SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * CSRF guard for cookie-session authentication. Browsers attach the session
+ * cookie to cross-site requests automatically, so every state-changing
+ * request authenticated via the ambient cookie must also carry the
+ * per-session `x-csrf-token` (issued at login and via GET /auth/me).
+ * Requests authenticated with explicit header secrets (x-admin-token,
+ * x-conversation-token) and safe methods are exempt.
+ */
+export const requireCsrf: RequestHandler = (req, res, next) => {
+  void (async () => {
+    if (CSRF_SAFE_METHODS.has(req.method)) {
+      next();
+      return;
+    }
+    if (req.authMethod !== 'session') {
+      next();
+      return;
+    }
+    const rawToken = sessionTokenFromRequest(req);
+    const expected = rawToken ? await sessionCsrfToken(rawToken) : null;
+    const provided = req.get('x-csrf-token') ?? '';
+    const a = Buffer.from(provided, 'utf8');
+    const b = Buffer.from(expected ?? '', 'utf8');
+    if (!expected || !provided || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      res.status(403).json({ error: 'CSRF token required' });
+      return;
+    }
+    next();
+  })().catch(next);
+};
 
 /* ------------------------------------------------------------------ *
  * Accounts
@@ -504,6 +585,16 @@ export async function verifyEmailToken(token: string): Promise<string | null> {
   return record.email;
 }
 
+/**
+ * Whether the first self-service sign-up may become an admin. This is an
+ * explicit opt-in so an unclaimed deployment cannot be taken over by whoever
+ * registers first; the sanctioned way to create the initial admin is the
+ * BOOTSTRAP_ADMIN_EMAIL/PASSWORD path (see bootstrapAdminFromEnv).
+ */
+export function firstUserAdminAllowed(): boolean {
+  return process.env.ALLOW_FIRST_USER_ADMIN === 'true';
+}
+
 export async function findOrCreateUserByEmail(email: string, name?: string): Promise<SessionUser> {
   const normalizedEmail = email.trim().toLowerCase();
   const existing = await findUserByEmail(normalizedEmail);
@@ -513,7 +604,7 @@ export async function findOrCreateUserByEmail(email: string, name?: string): Pro
   }
 
   const count = await users().countDocuments();
-  const role: Role = count === 0 ? 'admin' : 'agent';
+  const role: Role = count === 0 && firstUserAdminAllowed() ? 'admin' : 'agent';
   const displayName = name?.trim() || normalizedEmail.split('@')[0] || 'User';
   const { hash, salt } = hashPassword(crypto.randomBytes(32).toString('hex'));
 
@@ -555,8 +646,15 @@ export async function verifyGoogleIdToken(idToken: string): Promise<{ email: str
     const isVerified = data.email_verified === 'true' || data.email_verified === true;
     if (!isVerified) return null;
 
+    // Audience validation is mandatory: without a configured client ID we
+    // cannot tell which OAuth client issued the token, so refuse it rather
+    // than accepting tokens minted for any application.
     const expectedAud = (process.env.GOOGLE_CLIENT_ID ?? '').trim();
-    if (expectedAud && data.aud !== expectedAud) {
+    if (!expectedAud) {
+      console.warn('[relay] Google sign-in rejected: GOOGLE_CLIENT_ID is not configured');
+      return null;
+    }
+    if (data.aud !== expectedAud) {
       console.warn('[relay] Google token aud mismatch:', data.aud, 'expected:', expectedAud);
       return null;
     }
@@ -593,6 +691,7 @@ export async function audit(
       target,
       details,
       request_id: req.requestId ?? null,
+      expires_at: new Date(Date.now() + AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000),
     });
   } catch {
     // Audit failures must not break the request path; the structured log

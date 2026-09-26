@@ -58,25 +58,6 @@ const FEATURES: Array<{ icon: React.ReactNode; title: string; text: string }> = 
   },
 ];
 
-const PROBLEM_SOLUTION: Array<{ problem: string; solution: string }> = [
-  {
-    problem: 'Your team answers the same questions every day',
-    solution: 'Relay answers them from your knowledge base — instantly, at any hour',
-  },
-  {
-    problem: 'AI chatbots invent answers',
-    solution: 'Every Relay reply cites the exact support doc it used',
-  },
-  {
-    problem: 'Customers get stuck talking to a bot',
-    solution: 'One click — or one frustrated sentence — reaches a human',
-  },
-  {
-    problem: 'Agents waste time reading old conversations',
-    solution: 'Handoffs arrive with the full transcript and reason attached',
-  },
-];
-
 const BEFORE_AFTER: Array<{ label: string; note: string; count: number; human: boolean }> = [
   { label: 'Repetitive FAQs', note: 'Relay resolves with cited answers', count: 40, human: false },
   { label: 'Order & refund questions', note: 'Relay resolves with lookups and policy answers', count: 20, human: false },

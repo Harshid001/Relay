@@ -4,15 +4,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, MouseEvent, ReactNode } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import {
-  AlertCircle, ArrowRight, BarChart3, BookOpen, Bot, Check, CheckCircle2, Clock, Code, Copy,
-  ExternalLink, FileText, HelpCircle, Inbox, LayoutDashboard, LifeBuoy, Loader2, MessageSquare,
+  AlertCircle, ArrowRight, BarChart3, BookOpen, Bot, Check, CheckCircle2, Code, Copy,
+  HelpCircle, Inbox, LayoutDashboard, LifeBuoy, MessageSquare,
   MessagesSquare, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Settings as SettingsIcon,
-  ShieldCheck, Star, ThumbsDown, UserRound, Users, X,
+  ShieldCheck, Star, UserRound, Users, X,
 } from 'lucide-react';
 
-import { ApiError, AuthError, api, getAdminToken, setAdminToken } from '../service-api';
+import { AuthError, api, getAdminToken, setAdminToken } from '../service-api';
 import type { SessionUser } from '../service-api';
 import type {
   Conversation, ConversationDetail, ConversationStatus, Faq, FaqInput, Health, Intent,
@@ -20,10 +20,10 @@ import type {
 } from '../service-types';
 import { AccountCard } from '../Auth';
 import {
-  ADMIN_NAME, Avatar, BusinessStoryCard, CitedAnswer, EmptyState, INTENTS, INTENT_LABEL, IntentBars, IntentPill,
-  lastCustomerQueryRef, LogoMark, Modal, PROVIDER_LABEL, Spinner, STATUS_LABEL, StatCard, statCards,
-  StatusPill, VolumeChart, MessageBubble, currentGreeting, errorMessage, initials,
-  formatDateTime, formatSeconds, smoothPath, timeAgo, todayLabel, getFriendlyName,
+  Avatar, BusinessStoryCard, CitedAnswer, EmptyState, INTENTS, INTENT_LABEL, IntentBars, IntentPill,
+  lastCustomerQueryRef, LogoMark, Modal, Spinner, StatCard, statCards,
+  StatusPill, VolumeChart, MessageBubble, currentGreeting, errorMessage,
+  formatDateTime, timeAgo, todayLabel, getFriendlyName,
 } from '../ui/shared';
 
 /* ================================================================== *
@@ -653,7 +653,7 @@ interface ConversationsProps {
   onOpenWaiting: (id: string) => void;
 }
 
-function ConversationsPage({ conversations, loading, onOpen, newWaitingIds, onOpenWaiting }: ConversationsProps) {
+function ConversationsPage({ conversations, loading, onOpen, newWaitingIds }: ConversationsProps) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<StatusTab>('all');
   const [intent, setIntent] = useState<'all' | Intent>('all');
@@ -2075,7 +2075,7 @@ function SettingsPage({
                 <dd>
                   {mode === 'live'
                     ? 'Live conversations recorded in the server database.'
-                    : 'Seeded sample conversations plus any you create. Not live customer performance.'}
+                    : 'Demo mode. Any sample conversations here are seeded demonstration data, not live customer performance.'}
                 </dd>
               </dl>
             )}
@@ -2105,7 +2105,7 @@ function SettingsPage({
               <dt><span className="code">DATA_DIR</span></dt>
               <dd>Directory for local artifacts. Defaults to the server working directory.</dd>
               <dt><span className="code">SEED_DEMO</span></dt>
-              <dd>Set to <span className="code">false</span> to start with an empty workspace instead of seeded sample conversations.</dd>
+              <dd>Set to <span className="code">true</span> to seed sample conversations on first start. Unset or <span className="code">false</span> starts with an empty workspace.</dd>
               <dt><span className="code">PORT</span></dt>
               <dd>Port the API listens on. Defaults to <span className="code">3000</span>; the dev client proxies <span className="code">/api</span> to it.</dd>
             </dl>

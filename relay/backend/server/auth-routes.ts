@@ -18,6 +18,7 @@ import type { Request, RequestHandler, Response } from 'express';
 
 import * as auth from './auth.js';
 import { audit } from './auth.js';
+import * as rateLimiters from './ratelimit.js';
 import { sendVerificationEmail } from './notify.js';
 
 export const authRouter = Router();
@@ -25,57 +26,61 @@ export const authRouter = Router();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_NAME = 80;
 
-const emailThrottleMap = new Map<string, number>();
-function emailThrottle(email: string): boolean {
-  const now = Date.now();
-  const last = emailThrottleMap.get(email);
-  if (last && now - last < 60_000) {
-    return false;
+/**
+ * Auth throttles are stored in MongoDB (server/ratelimit.ts) rather than
+ * process memory, so they hold across serverless instances and restarts
+ * exactly like the general API rate limiter. Both fail open on a store error:
+ * the outage is already surfaced by /api/health, and refusing every sign-in
+ * would turn a database blip into a lockout.
+ */
+const EMAIL_CODE_WINDOW_MS = 60_000;
+const LOGIN_WINDOW_MS = 10 * 60_000;
+const LOGIN_MAX_FAILURES = 8;
+
+async function emailThrottle(email: string): Promise<boolean> {
+  try {
+    const count = await rateLimiters.readCounter(`emailcode|${email}`, EMAIL_CODE_WINDOW_MS);
+    if (count >= 1) return false;
+    await rateLimiters.bumpCounter(`emailcode|${email}`, EMAIL_CODE_WINDOW_MS);
+  } catch {
+    /* fail open */
   }
-  emailThrottleMap.set(email, now);
   return true;
 }
-
-/* Brute-force guard: failed logins per IP+email in a sliding window. */
-const attempts = new Map<string, { count: number; resetAt: number }>();
-const MAX_ATTEMPTS_ENTRIES = 5000;
-
-const attemptsCleanup = setInterval(() => {
-  const now = Date.now();
-  attempts.forEach((entry, key) => {
-    if (entry.resetAt <= now) attempts.delete(key);
-  });
-  if (attempts.size > MAX_ATTEMPTS_ENTRIES) {
-    attempts.clear();
-  }
-}, 5 * 60_000);
-attemptsCleanup.unref?.();
 
 function attemptKey(req: Request, email: string): string {
-  return `${req.ip ?? 'unknown'}|${email.trim().toLowerCase()}`;
+  return `login|${req.ip ?? 'unknown'}|${email.trim().toLowerCase()}`;
 }
 
-function loginThrottle(req: Request, res: Response, email: string): boolean {
-  const key = attemptKey(req, email);
-  const now = Date.now();
-  const entry = attempts.get(key);
-  if (entry && entry.resetAt > now && entry.count >= 8) {
-    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.resetAt - now) / 1000))));
-    res.status(429).json({ error: 'Too many sign-in attempts. Try again shortly.' });
-    return false;
+/** Blocks a sign-in attempt once the failure budget for IP+email is spent. */
+async function loginThrottle(req: Request, res: Response, email: string): Promise<boolean> {
+  try {
+    const count = await rateLimiters.readCounter(attemptKey(req, email), LOGIN_WINDOW_MS);
+    if (count >= LOGIN_MAX_FAILURES) {
+      res.setHeader('Retry-After', '60');
+      res.status(429).json({ error: 'Too many sign-in attempts. Try again shortly.' });
+      return false;
+    }
+  } catch {
+    /* fail open */
   }
   return true;
 }
 
-function recordFailure(req: Request, email: string): void {
-  const key = attemptKey(req, email);
-  const now = Date.now();
-  const entry = attempts.get(key);
-  if (!entry || entry.resetAt <= now) {
-    attempts.set(key, { count: 1, resetAt: now + 10 * 60_000 });
-    return;
+async function recordFailure(req: Request, email: string): Promise<void> {
+  try {
+    await rateLimiters.bumpCounter(attemptKey(req, email), LOGIN_WINDOW_MS);
+  } catch {
+    /* fail open */
   }
-  entry.count += 1;
+}
+
+async function clearFailures(req: Request, email: string): Promise<void> {
+  try {
+    await rateLimiters.resetCounter(attemptKey(req, email), LOGIN_WINDOW_MS);
+  } catch {
+    /* fail open */
+  }
 }
 
 function readBody(body: unknown): Record<string, unknown> {
@@ -119,21 +124,21 @@ authRouter.post(
       res.status(400).json({ error: 'Enter a valid email and password.' });
       return;
     }
-    if (!loginThrottle(req, res, email)) return;
+    if (!(await loginThrottle(req, res, email))) return;
 
     const user = await auth.authenticate(email, password);
     if (!user) {
-      recordFailure(req, email);
+      await recordFailure(req, email);
       await audit(req, 'auth.login_failed', email);
       res.status(401).json({ error: 'Incorrect email or password.' });
       return;
     }
 
-    attempts.delete(attemptKey(req, email));
-    const token = await auth.createSession(user.id, req.get('user-agent') ?? null);
-    auth.setSessionCookie(req, res, token);
+    await clearFailures(req, email);
+    const session = await auth.createSession(user.id, req.get('user-agent') ?? null);
+    auth.setSessionCookie(req, res, session.token);
     await audit(req, 'auth.login', user.email);
-    res.json({ user });
+    res.json({ user, csrfToken: session.csrfToken });
   }),
 );
 
@@ -154,7 +159,14 @@ authRouter.post(
 authRouter.get(
   '/me',
   wrap(async (req, res) => {
-    res.json({ user: req.user ?? null });
+    // Session-authenticated clients need the per-session CSRF token for
+    // state-changing requests (see requireCsrf); it is readable here because
+    // only the session owner can call /me.
+    const csrfToken =
+      req.authMethod === 'session'
+        ? await auth.sessionCsrfToken(auth.sessionTokenFromCookie(req) ?? '')
+        : null;
+    res.json({ user: req.user ?? null, csrfToken });
   }),
 );
 
@@ -178,7 +190,7 @@ authRouter.post(
       return;
     }
 
-    if (!emailThrottle(email)) {
+    if (!(await emailThrottle(email))) {
       res.status(429).json({ error: 'Please wait a minute before requesting another verification code.' });
       return;
     }
@@ -192,11 +204,18 @@ authRouter.post(
     await sendVerificationEmail(email, code, magicLink);
     await audit(req, 'auth.email_code_sent', email);
 
-    const isNonProd = process.env.NODE_ENV !== 'production' && (process.env.ALLOW_AUTH_DEBUG_CODE === 'true' || !process.env.RESEND_API_KEY);
+    // Dev-only escape hatch: return the code/token ONLY when the operator
+    // explicitly opts in AND the caller is on loopback. Never key this off
+    // NODE_ENV or the absence of an email provider — a misconfigured public
+    // deployment would hand out account access to anyone who asks.
+    const exposeDebugSecrets =
+      process.env.ALLOW_AUTH_DEBUG_CODE === 'true' &&
+      process.env.NODE_ENV !== 'production' &&
+      auth.isLoopbackRequest(req);
     res.json({
       ok: true,
       message: 'Verification code sent to your email.',
-      ...(isNonProd ? { debugCode: code, debugToken: token } : {}),
+      ...(exposeDebugSecrets ? { debugCode: code, debugToken: token } : {}),
     });
   }),
 );
@@ -232,10 +251,10 @@ authRouter.post(
     }
 
     const user = await auth.findOrCreateUserByEmail(email);
-    const sessionToken = await auth.createSession(user.id, req.get('user-agent') ?? null);
-    auth.setSessionCookie(req, res, sessionToken);
+    const session = await auth.createSession(user.id, req.get('user-agent') ?? null);
+    auth.setSessionCookie(req, res, session.token);
     await audit(req, 'auth.email_verified_login', user.email);
-    res.json({ user });
+    res.json({ user, csrfToken: session.csrfToken });
   }),
 );
 
@@ -256,10 +275,10 @@ authRouter.post(
     }
 
     const user = await auth.findOrCreateUserByEmail(googleUser.email, googleUser.name);
-    const sessionToken = await auth.createSession(user.id, req.get('user-agent') ?? null);
-    auth.setSessionCookie(req, res, sessionToken);
+    const session = await auth.createSession(user.id, req.get('user-agent') ?? null);
+    auth.setSessionCookie(req, res, session.token);
     await audit(req, 'auth.google_login', user.email);
-    res.json({ user });
+    res.json({ user, csrfToken: session.csrfToken });
   }),
 );
 

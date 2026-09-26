@@ -3,18 +3,17 @@
  * order-lookup tool display, ratings and demo starters.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowRight, Bot, Check, CheckCircle2, Loader2, MessageSquare, Send,
+  AlertCircle, Bot, CheckCircle2, Send,
   Sparkles, Star, UserRound, Users, Wrench,
 } from 'lucide-react';
 
 import { ApiError, api, customerApi, loadCustomerStore, saveCustomerStore } from '../service-api';
-import type { Conversation, ConversationDetail, CustomerStore, Faq, Health, Message } from '../service-types';
+import type { Conversation, CustomerStore, Faq, Health, Message } from '../service-types';
 import {
-  CitedAnswer, EmptyState, INTENT_LABEL, LogoMark, Modal, Spinner, STATUS_LABEL, MessageBubble, lastCustomerQueryRef, errorMessage,
-  formatDateTime, timeAgo,
+  CitedAnswer, EmptyState, INTENT_LABEL, LogoMark, Modal, Spinner, MessageBubble, lastCustomerQueryRef, errorMessage,
+  formatDateTime,
 } from '../ui/shared';
 
 interface DemoStarter {
@@ -414,7 +413,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
 
   return (
     <div className="customer">
-      <div className="customer-bar">
+      <header className="customer-bar">
         <div className="row">
           <LogoMark />
           <span className="brand-word">relay</span>
@@ -443,9 +442,9 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
           <button className="btn btn-outline btn-sm" onClick={startNew}>New conversation</button>
           <button className="btn btn-ghost btn-sm" onClick={onExit}>Back to workspace</button>
         </div>
-      </div>
+      </header>
 
-      <div className="customer-grid">
+      <main className="customer-grid">
         <aside className="customer-aside">
           <h1 className="customer-title">A helpful answer is one message away.</h1>
           <p className="page-sub">
@@ -675,7 +674,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
             )}
           </div>
         </section>
-      </div>
+      </main>
 
       {source ? (
         <Modal

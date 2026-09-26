@@ -1,0 +1,109 @@
+name: Backup
+
+# Automated backups. Opt in by setting the repository variable
+# BACKUP_ENABLED=true and these secrets:
+#   MONGODB_URI            MongoDB / Atlas SRV connection string
+#   MONGODB_DB             database name (defaults to `relay`)
+#   R2_ACCESS_KEY_ID       Cloudflare R2 token id
+#   R2_SECRET_ACCESS_KEY   Cloudflare R2 token secret
+#   R2_ENDPOINT            https://<accountid>.r2.cloudflarestorage.com
+#   R2_BUCKET              bucket name (e.g. relay-backups)
+#
+# The nightly job dumps to Cloudflare R2 (via the aws CLI) and keeps a 7-day
+# artifact. On the 1st of each month a rehearsal restores the latest archive
+# into a throwaway database so the restore path is exercised, not just assumed.
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # nightly dump
+    - cron: '0 4 1 * *' # monthly restore rehearsal
+  workflow_dispatch:
+    inputs:
+      rehearsal:
+        description: Also run a restore rehearsal
+        type: boolean
+        default: false
+
+jobs:
+  backup:
+    if: ${{ vars.BACKUP_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install MongoDB Database Tools
+        run: |
+          curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc |
+            sudo gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor --yes
+          echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse" |
+            sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+          sudo apt-get update
+          sudo apt-get install -y mongodb-database-tools
+
+      - name: Dump MongoDB
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB: ${{ secrets.MONGODB_DB }}
+        run: |
+          STAMP="$(date -u +%Y-%m-%d_%H%M%S)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          mongodump --uri="$MONGODB_URI" --db="${MONGODB_DB:-relay}" \
+            --archive="relay-$STAMP.archive.gz" --gzip
+          ls -lh "relay-$STAMP.archive.gz"
+
+      - name: Upload to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp "relay-$STAMP.archive.gz" \
+            "s3://$R2_BUCKET/mongo/relay-$STAMP.archive.gz" --storage-class STANDARD
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-backup-${{ env.STAMP }}
+          path: relay-${{ env.STAMP }}.archive.gz
+          retention-days: 7
+
+  restore-rehearsal:
+    if: ${{ vars.BACKUP_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' && inputs.rehearsal || github.event.schedule == '0 4 1 * *') }}
+    runs-on: ubuntu-latest
+    services:
+      scratch-mongo:
+        image: mongo:8
+        ports:
+          - 27018:27017
+    steps:
+      - name: Install MongoDB Database Tools
+        run: |
+          curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc |
+            sudo gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor --yes
+          echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/8.0 multiverse" |
+            sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+          sudo apt-get update
+          sudo apt-get install -y mongodb-database-tools
+
+      - name: Restore the latest backup into the scratch database
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          KEY="$(aws --endpoint-url "$R2_ENDPOINT" s3 ls "s3://$R2_BUCKET/mongo/" | sort | tail -1 | awk '{print $4}')"
+          if [ -z "$KEY" ]; then
+            echo "::error::no backups found in s3://$R2_BUCKET/mongo/"
+            exit 1
+          fi
+          echo "restoring $KEY"
+          aws --endpoint-url "$R2_ENDPOINT" s3 cp "s3://$R2_BUCKET/mongo/$KEY" latest.archive.gz
+          mongorestore --uri="mongodb://127.0.0.1:27018" --archive=latest.archive.gz --gzip --drop
+
+      - name: Verify the restore
+        run: |
+          docker run --rm --network host mongo:8 mongosh "mongodb://127.0.0.1:27018/relay" --quiet --eval '
+            const conversations = db.conversations.countDocuments();
+            const faqs = db.faqs.countDocuments();
+            print(`restored conversations=${conversations} faqs=${faqs}`);
+            if (conversations + faqs === 0) { throw new Error("restore produced no documents"); }
+          '

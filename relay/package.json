@@ -7,8 +7,19 @@
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
     "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:frontend",
     "start:backend": "npm --prefix backend run start",
     "test:backend": "npm --prefix backend run test",
-    "typecheck:backend": "npm --prefix backend run typecheck"
+    "typecheck:backend": "npm --prefix backend run typecheck",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.9",
+    "typescript-eslint": "^8.70.1"
   }
 }

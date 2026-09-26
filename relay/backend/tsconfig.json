@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["server/**/*.ts", "api/**/*.ts", "tests/**/*.ts"]
+  "include": ["server/**/*.ts", "../api/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts", "playwright.config.ts"]
 }

@@ -11,9 +11,12 @@ Browser ─> Vercel (CDN: static React build + serverless Express API)
                     └─> MongoDB Atlas (free M0 cluster, replica set)
 ```
 
-The repo ships ready for this: `api/index.ts` is the serverless entrypoint
+The repo ships ready for this: `relay/api/index.ts` is the serverless
+entrypoint (root-level `api/` — the only place Vercel discovers functions)
 and `vercel.json` routes `/api/*` to it while serving the Vite build from
-`dist/` with an SPA fallback.
+`frontend/dist/` with an SPA fallback. `installCommand` installs backend
+(prod-only) and frontend dependencies; `functions` raises the API timeout
+to 60 s for long assistant turns.
 
 ---
 
@@ -35,20 +38,22 @@ and `vercel.json` routes `/api/*` to it while serving the Vite build from
 1. Push the repo to GitHub, then [vercel.com/new](https://vercel.com/new) →
    Import `Harshid001/Relay`.
    - **Root Directory**: Click "Edit" and select `relay`.
-   - Framework preset **Vite** is auto-detected; `vercel.json` supplies the rest (`npm run build`, output `dist/`, API routing).
+   - Framework preset **Vite** is auto-detected; `vercel.json` supplies the rest (`npm run build`, output `frontend/dist/`, API routing).
 2. Environment variables (Project → Settings → Environment Variables):
 
    | Variable | Value |
    |---|---|
    | `MONGODB_URI` | your Atlas SRV URI |
    | `MONGODB_DB` | `relay` |
-   | `SEED_DEMO` | `true` for the demo experience, `false` for real use |
+   | `SEED_DEMO` | optional; only `true` seeds demo conversations. Omit for an empty workspace |
    | `ADMIN_TOKEN` | `openssl rand -hex 32` |
    | `TRUST_PROXY` | `1` (Vercel is one proxy hop; enables client-IP rate limits + Secure cookies) |
    | `ALLOWED_HOSTS` | `*.vercel.app` (preview deploys) plus your custom domain |
    | `BOOTSTRAP_ADMIN_EMAIL` | you@yourdomain.com |
    | `BOOTSTRAP_ADMIN_PASSWORD` | 12+ characters |
-   | `GOOGLE_CLIENT_ID` | optional Google OAuth Client ID for 1-click Google Sign-In |
+   | `GOOGLE_CLIENT_ID` | optional Google OAuth Client ID for 1-click Google Sign-In. **Sign-in is disabled while unset** (the endpoint refuses unvalidated tokens) |
+   | `ALLOW_FIRST_USER_ADMIN` | optional; leave unset so the first self-service sign-up is an `agent`. The bootstrap admin above is the intended first admin |
+   | `ERROR_WEBHOOK_URL` | optional error-tracking sink; 5xx and unhandled errors are POSTed as JSON |
    | `NOTIFY_EMAILS` / `RESEND_API_KEY` | optional email alerts and verification OTP/magic link delivery |
    | `CODEBUDDY_LIVE` | keep `false` — the live SDK path spawns a CLI process and is not serverless-safe |
    | `FREE_CONVERSATIONS_LIMIT` | optional; default `300`, set `0` for unlimited |
@@ -67,14 +72,29 @@ and `vercel.json` routes `/api/*` to it while serving the Vite build from
 - **Realtime:** the admin SSE stream lives as long as one function invocation
   (`maxDuration: 60`); the workspace UI's polling fallback covers updates
   after a stream recycle.
-- **Rate limits & busy locks** are per serverless instance — approximate, not
-  global. Move to a shared store if that ever matters.
+- **Rate limits & turn locks** are enforced in MongoDB, so they hold across
+  serverless instances (one indexed write per limited request — the price of
+  a shared budget).
 - **Cold starts:** the first request after idle pays the Atlas connect +
   index build (~1–2 s).
-- **Backups:** Atlas M0 has no continuous backups. Periodically run
-  `mongodump --uri "$MONGODB_URI" --archive --gzip` from your machine (or a
-  scheduled GitHub Action) and store the archive in Cloudflare R2 via
-  `scripts/backup-r2.sh` as a reference for the S3 upload half.
+- **Backups:** Atlas M0 has no continuous backups. Either run
+  `mongodump --uri "$MONGODB_URI" --archive --gzip` from your machine, or enable
+  the scheduled workflow: set `BACKUP_ENABLED=true` and the `MONGODB_URI` /
+  `R2_*` secrets, and `.github/workflows/backup.yml` dumps nightly to Cloudflare
+  R2 and rehearses a restore monthly. `scripts/backup-r2.sh` is the VM-side
+  equivalent.
+
+## 4 · Rollback (bad deploy)
+
+1. **App:** Vercel dashboard → Deployments → previous production deployment →
+   **Promote to Production** (instant, no rebuild). Verify
+   `/api/health` → `status:"ok"` and `/api/health/system` → `"healthy"`.
+2. **Preview first:** every push already builds a preview URL — click through
+   `/`, `/chat` and `/app` there before promoting anything to production.
+3. **Data:** serverless deploys never migrate schema automatically, so data
+   rollback is rarely needed. If it is, `mongorestore` the last manual
+   `mongodump` archive against the Atlas URI (test on a scratch cluster
+   first — restore replaces data).
 
 ## Free-tier budget
 

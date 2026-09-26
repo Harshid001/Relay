@@ -6,10 +6,10 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, MouseEvent, ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import {
-  AlertCircle, ArrowRight, BookOpen, Bot, Check, CheckCircle2, Clock, ExternalLink,
-  Inbox, Loader2, MessagesSquare, MessageSquare, ShieldCheck, Sparkles, Star, ThumbsDown, ThumbsUp, Users, Wrench, X,
+  AlertCircle, BookOpen, Bot, Check, CheckCircle2, Clock, ExternalLink,
+  Inbox, Loader2, MessagesSquare, ShieldCheck, Sparkles, Star, ThumbsDown, ThumbsUp, Users, Wrench, X,
 } from 'lucide-react';
 
 import { ApiError } from '../service-api';

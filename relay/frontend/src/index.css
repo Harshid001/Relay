@@ -13,7 +13,9 @@
 
   --ink: #202b25;
   --ink-soft: #5c6b62;
-  --ink-faint: #8a978f;
+  /* Secondary text floor: ~5.3:1 on white and every ivory surface, so all
+     small secondary copy (hints, sublabels, empty states) passes WCAG AA. */
+  --ink-faint: #5f6f66;
 
   --primary: #306645;
   --primary-hover: #27543a;
@@ -2243,7 +2245,7 @@ mark.cite .cite-note {
   font-weight: 550;
   border: none;
   background: transparent;
-  color: var(--muted, #64748b);
+  color: var(--ink-soft, #5c6b62);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -2322,7 +2324,7 @@ mark.cite .cite-note {
 }
 
 .landing-links a {
-  color: var(--muted, #64748b);
+  color: var(--ink-soft, #5c6b62);
   text-decoration: none;
   font-size: 14px;
   font-weight: 550;

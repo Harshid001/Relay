@@ -7,14 +7,30 @@
  *   /app         → admin workspace (session-gated)
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { AccountCard, LoginPage, useSession } from './Auth';
+import { LoginPage, useSession } from './Auth';
 import ErrorBoundary from './ErrorBoundary';
-import CustomerCenter from './customer/CustomerCenter';
-import AdminApp from './admin/AdminApp';
 import Landing from './Landing';
 import { Spinner } from './ui/shared';
+
+/**
+ * Route-level code splitting: the landing page (first paint for every
+ * visitor) ships without the chat or admin workspace bundles. Each surface
+ * loads on demand when its route is entered.
+ */
+const CustomerCenter = lazy(() => import('./customer/CustomerCenter'));
+const AdminApp = lazy(() => import('./admin/AdminApp'));
+
+function RouteFallback({ label }: { label: string }) {
+  return (
+    <div className="auth-shell" role="status" aria-live="polite">
+      <div className="auth-card" style={{ alignItems: 'center', textAlign: 'center' }}>
+        <div className="loading-block"><Spinner />Loading {label}…</div>
+      </div>
+    </div>
+  );
+}
 
 type Route =
   | { view: 'landing' }
@@ -51,7 +67,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       {route.view === 'chat' ? (
-        <CustomerCenter fresh={route.fresh} onExit={() => go('/')} />
+        <Suspense fallback={<RouteFallback label="the chat" />}>
+          <CustomerCenter fresh={route.fresh} onExit={() => go('/')} />
+        </Suspense>
       ) : route.view === 'workspace' ? (
         <WorkspaceRoot onPreviewChat={() => go('/chat')} onNewConversation={() => go('/chat?new=1')} />
       ) : (
@@ -105,13 +123,15 @@ function WorkspaceRoot({ onPreviewChat, onNewConversation }: {
   }
 
   return (
-    <ErrorBoundary>
-      <AdminApp
-        session={session.status === 'signed-in' ? session.user : null}
-        onSignOut={signOut}
-        onPreviewChat={onPreviewChat}
-        onNewConversation={onNewConversation}
-      />
-    </ErrorBoundary>
+    <Suspense fallback={<RouteFallback label="the workspace" />}>
+      <ErrorBoundary>
+        <AdminApp
+          session={session.status === 'signed-in' ? session.user : null}
+          onSignOut={signOut}
+          onPreviewChat={onPreviewChat}
+          onNewConversation={onNewConversation}
+        />
+      </ErrorBoundary>
+    </Suspense>
   );
 }

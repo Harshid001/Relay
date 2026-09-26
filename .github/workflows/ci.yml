@@ -59,12 +59,114 @@ jobs:
         working-directory: relay/backend
         run: npm run typecheck
 
+      - name: Build backend (compiled production artifact)
+        working-directory: relay/backend
+        run: npm run build
+
+      - name: Audit backend dependencies (fail on high/critical)
+        working-directory: relay/backend
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit frontend dependencies (fail on high/critical)
+        working-directory: relay/frontend
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Build frontend
         working-directory: relay/frontend
         run: npm run build
+
+      - name: Frontend unit tests
+        working-directory: relay/frontend
+        run: npm run test:unit
 
       - name: Integration tests (real server + MongoDB)
         working-directory: relay/backend
         run: npm test
         env:
           MONGODB_URI: mongodb://127.0.0.1:27017
+
+      - name: Coverage (enforced floor; server child-process lines are not merged, see package.json)
+        working-directory: relay/backend
+        run: npm run test:coverage
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017
+
+      - name: Install Playwright browsers
+        working-directory: relay/backend
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E pilot flow (real Chromium + server + MongoDB)
+        working-directory: relay/backend
+        run: npm run test:e2e
+        env:
+          MONGODB_URI: mongodb://127.0.0.1:27017
+
+      - name: Upload Playwright trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: relay/backend/test-results
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+
+      - name: Install lint tooling
+        working-directory: relay
+        run: npm ci
+
+      - name: Lint (ESLint, zero warnings)
+        working-directory: relay
+        run: npm run lint
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose configuration
+        run: docker compose -f relay/docker-compose.prod.yml config --quiet
+        env:
+          DOMAIN: relay.example.com
+          ADMIN_TOKEN: ci-dummy-admin-token
+          BOOTSTRAP_ADMIN_EMAIL: ci@example.com
+          BOOTSTRAP_ADMIN_PASSWORD: ci-dummy-password
+
+      - name: Build production image
+        run: docker build -t relay:ci relay
+
+      - name: Start MongoDB
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:8
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok' 2>/dev/null | grep -q 1 && exit 0
+            sleep 2
+          done
+          echo "::error::mongo did not become ready"
+          docker logs mongo
+          exit 1
+
+      - name: Smoke-test the production image
+        run: |
+          docker run -d --name relay-ci --network host \
+            -e MONGODB_URI=mongodb://127.0.0.1:27017 \
+            -e ADMIN_TOKEN=ci-dummy-admin-token \
+            relay:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              curl -fsS http://127.0.0.1:3000/api/health
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::relay image did not answer /api/health"
+          docker logs relay-ci
+          exit 1

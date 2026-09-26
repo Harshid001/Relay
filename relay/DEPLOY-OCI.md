@@ -83,8 +83,8 @@ docker compose -f docker-compose.prod.yml logs -f app   # wait for "listening"
 ```
 
 First start: Caddy obtains a certificate for `$DOMAIN`, Mongo initializes as
-a single-node replica set, the app connects, seeds nothing (`SEED_DEMO=false`),
-and bootstraps the admin account from `BOOTSTRAP_ADMIN_*`.
+a single-node replica set, the app connects, seeds nothing (demo seeding is
+opt-in), and bootstraps the admin account from `BOOTSTRAP_ADMIN_*`.
 
 **Verify:**
 
@@ -152,11 +152,38 @@ docker compose -f docker-compose.prod.yml restart app
 docker compose -f docker-compose.prod.yml exec mongo mongosh relay
 ```
 
+### Rollback (bad deploy)
+
+```bash
+cd /opt/relay
+
+# 1. Confirm the failure first:
+curl -s https://relay.yourdomain.com/api/health
+docker compose -f docker-compose.prod.yml logs --tail=100 app
+
+# 2. App-only rollback: re-point at the last good tree and rebuild.
+#    (Keep the previous release as /opt/relay-prev, or check out the last
+#    good commit — never roll forward blindly.)
+git rev-parse HEAD > /tmp/relay-bad-sha   # record what failed
+git checkout <last-good-sha>
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build app
+curl -s https://relay.yourdomain.com/api/health   # must be status:"ok"
+
+# 3. Data rollback (only if the bad deploy corrupted data — the app never
+#    migrates schema automatically, so this is rarely needed):
+/opt/relay/scripts/restore-r2.sh                 # latest nightly dump
+# restore-r2.sh uses --drop: it REPLACES the database. Confirm the dump
+# timestamp before running it on production data.
+```
+
+Order matters: app first, data only if needed, health-check after each step.
+
 ## 8 · Hardening checklist (do these before sharing the URL)
 
 - [ ] `ADMIN_TOKEN` is a fresh `openssl rand -hex 32`
 - [ ] `BOOTSTRAP_ADMIN_PASSWORD` is unique and 12+ chars
-- [ ] `SEED_DEMO=false` (no sample conversations in production)
+- [ ] `SEED_DEMO` is unset or not `true` (demo seeding is opt-in, so a fresh
+      production workspace has no sample conversations)
 - [ ] `DOMAIN` is set (the compose file adds it to `ALLOWED_HOSTS`) — without
       it every public request gets `403 Forbidden host`
 - [ ] VM security list exposes **only** 80/443

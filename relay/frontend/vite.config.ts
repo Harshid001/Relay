@@ -6,5 +6,17 @@ export default defineConfig({
   plugins: [react()],
   server: { host: '127.0.0.1', port: 5173, strictPort: true, proxy: { '/api': 'http://127.0.0.1:3000' } },
   preview: { host: '127.0.0.1', port: 4173 },
-  build: { outDir: 'dist', sourcemap: false }
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Vendor chunk: react/react-dom/lucide ship once and stay cached
+        // across the lazy route chunks (landing, chat, workspace).
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'lucide-react'],
+        },
+      },
+    },
+  }
 });

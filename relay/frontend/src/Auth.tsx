@@ -30,6 +30,12 @@ declare global {
 import { ApiError, authApi } from './service-api';
 import type { SessionUser } from './service-api';
 
+/** A 200 sign-in response must carry a user; a null is a server bug, surfaced loudly. */
+function requireSignedInUser(response: { user: SessionUser | null }): SessionUser {
+  if (!response.user) throw new ApiError('Sign-in succeeded but the server returned no user.', 500);
+  return response.user;
+}
+
 export type SessionState =
   | { status: 'loading' }
   | { status: 'signed-out' }
@@ -112,7 +118,8 @@ export function LoginPage({
       setBusy(true);
       setError(null);
       authApi.verifyEmail(paramEmail, undefined, verifyToken)
-        .then(({ user }) => {
+        .then((response) => {
+          const user = requireSignedInUser(response);
           const cleanUrl = window.location.pathname;
           window.history.replaceState(null, '', cleanUrl);
           onLoggedIn(user);
@@ -141,7 +148,7 @@ export function LoginPage({
             setBusy(true);
             setError(null);
             authApi.loginWithGoogle(response.credential)
-              .then(({ user }) => onLoggedIn(user))
+              .then((result) => onLoggedIn(requireSignedInUser(result)))
               .catch((err) => {
                 setError(err instanceof ApiError ? err.message : 'Google sign-in failed.');
                 setBusy(false);
@@ -177,8 +184,8 @@ export function LoginPage({
     setBusy(true);
     setError(null);
     try {
-      const { user } = await authApi.login(trimmed, password);
-      onLoggedIn(user);
+      const response = await authApi.login(trimmed, password);
+      onLoggedIn(requireSignedInUser(response));
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 401
@@ -227,8 +234,8 @@ export function LoginPage({
     setBusy(true);
     setError(null);
     try {
-      const { user } = await authApi.verifyEmail(email.trim(), trimmedCode);
-      onLoggedIn(user);
+      const response = await authApi.verifyEmail(email.trim(), trimmedCode);
+      onLoggedIn(requireSignedInUser(response));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Invalid or expired verification code.');
     } finally {
