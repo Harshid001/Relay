@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent, ReactNode } from 'react';
 import {
   AlertCircle, ArrowRight, BookOpen, Bot, Check, CheckCircle2, Clock, ExternalLink,
-  Inbox, Loader2, MessagesSquare, MessageSquare, Sparkles, Star, Users, Wrench, X,
+  Inbox, Loader2, MessagesSquare, MessageSquare, Sparkles, Star, ThumbsDown, ThumbsUp, Users, Wrench, X,
 } from 'lucide-react';
 
 import { ApiError } from '../service-api';
@@ -450,40 +450,93 @@ export function statCards(stats: Stats | null, days: 7 | 30) {
   const ratings = stats?.ratingCount ?? 0;
   return [
     {
-      key: 'total',
-      label: 'Total conversations',
-      value: stats ? String(stats.total) : '—',
-      foot: `Conversations started in the ${window}.`,
-      icon: <MessagesSquare size={17} aria-hidden="true" />,
-      tone: '',
+      key: 'ai-resolutions',
+      label: 'AI Resolutions',
+      value: stats ? String(stats.aiResolutions) : '—',
+      foot: 'Resolved by Relay without human handoff.',
+      icon: <Bot size={17} aria-hidden="true" />,
+      tone: 'lime',
+    },
+    {
+      key: 'human-handoffs',
+      label: 'Human Handoffs',
+      value: stats ? String(stats.humanHandoffs) : '—',
+      foot: 'Handed to your team with full context.',
+      icon: <Users size={17} aria-hidden="true" />,
+      tone: 'mist',
     },
     {
       key: 'resolution',
-      label: 'Resolution rate',
+      label: 'Resolution Rate',
       value: stats ? `${stats.resolutionRate}%` : '—',
-      foot: `Share of the ${window} marked resolved.`,
+      foot: `Share of the ${window} resolved by AI.`,
       icon: <CheckCircle2 size={17} aria-hidden="true" />,
       tone: 'lime',
     },
     {
+      key: 'response',
+      label: 'Average Response Time',
+      value: stats && stats.avgResponseSeconds !== null ? formatSeconds(stats.avgResponseSeconds) : '—',
+      foot: 'Average time to first verified answer.',
+      icon: <Clock size={17} aria-hidden="true" />,
+      tone: 'mist',
+    },
+    {
       key: 'csat',
-      label: 'Customer satisfaction',
+      label: 'Customer Satisfaction (CSAT)',
       value: stats && stats.csat !== null ? `${stats.csat}%` : '—',
       foot: ratings
-        ? `From ${ratings} customer rating${ratings === 1 ? '' : 's'} of 4 or 5.`
+        ? `From ${ratings} customer rating${ratings === 1 ? '' : 's'}.`
         : 'No customer ratings submitted yet.',
       icon: <Star size={17} aria-hidden="true" />,
       tone: 'sand',
     },
     {
-      key: 'response',
-      label: 'Avg. first response',
-      value: stats && stats.avgResponseSeconds !== null ? formatSeconds(stats.avgResponseSeconds) : '—',
-      foot: 'Time from a customer message to the first reply.',
-      icon: <Clock size={17} aria-hidden="true" />,
-      tone: 'mist',
+      key: 'total',
+      label: 'Total Conversations',
+      value: stats ? String(stats.total) : '—',
+      foot: `Conversations started in the ${window}.`,
+      icon: <MessagesSquare size={17} aria-hidden="true" />,
+      tone: '',
     },
   ];
+}
+
+export function BusinessStoryCard({ stats, days }: { stats: Stats | null; days: 7 | 30 }) {
+  if (!stats) return null;
+  return (
+    <section className="business-story-card" aria-label="Business impact summary">
+      <div className="story-badge">
+        <Sparkles size={13} aria-hidden="true" />
+        Business story · Last {days} days
+      </div>
+      <div className="story-heading">
+        {stats.total > 0
+          ? `${stats.total} total conversations`
+          : 'Ready for customer conversations'}
+      </div>
+      <div className="story-row">
+        <div className="story-pill highlight">
+          <strong>{stats.aiResolutions}</strong> resolved by Relay
+        </div>
+        <div className="story-pill">
+          <strong>{stats.humanHandoffs}</strong> handed to your team
+        </div>
+        <div className="story-pill">
+          <strong>{stats.resolutionRate}%</strong> AI resolution rate
+        </div>
+        <div className="story-pill">
+          <strong>{stats.csat !== null ? `${stats.csat}%` : '—'}</strong> CSAT
+        </div>
+        <div className="story-pill">
+          <strong>{stats.avgResponseSeconds !== null ? formatSeconds(stats.avgResponseSeconds) : '—'}</strong> avg response time
+        </div>
+      </div>
+      <p className="story-foot">
+        Real measurements only. No manufactured percentages. Answer when confident, escalate when necessary.
+      </p>
+    </section>
+  );
 }
 
 export function IntentBars({ stats }: { stats: Stats | null }) {
@@ -521,12 +574,31 @@ export function IntentBars({ stats }: { stats: Stats | null }) {
  * ================================================================== */
 
 export function MessageBubble({
-  message, faqs, onOpenSource,
+  message,
+  faqs,
+  onOpenSource,
+  onFeedback,
+  allowFeedback = false,
 }: {
   message: Message;
   faqs: Faq[];
   onOpenSource: (source: { id: string; title: string }) => void;
+  onFeedback?: (
+    messageId: string,
+    feedback: {
+      helpful: boolean;
+      reason?: 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null;
+      comment?: string | null;
+    },
+  ) => void;
+  allowFeedback?: boolean;
 }) {
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [selectedReason, setSelectedReason] = useState<
+    'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null
+  >(null);
+  const [feedbackSent, setFeedbackSent] = useState(Boolean(message.feedback));
+
   const tone =
     message.role === 'user' ? 'msg-user'
       : message.role === 'human' ? 'msg-human'
@@ -539,6 +611,8 @@ export function MessageBubble({
         : PROVIDER_LABEL[message.provider ?? ''] ?? (message.role === 'human' ? 'Human agent' : 'Relay assistant');
 
   const isTool = message.role === 'assistant' && Boolean(message.tool);
+  const canShowFeedback = allowFeedback && message.role === 'assistant' && !message.tool;
+  const currentFeedback = message.feedback;
 
   return (
     <div className={`msg ${tone}${isTool ? ' msg-tool' : ''}`}>
@@ -570,6 +644,111 @@ export function MessageBubble({
           })}
         </div>
       ) : null}
+
+      {canShowFeedback ? (
+        <div className="feedback-section">
+          {currentFeedback || feedbackSent ? (
+            <div className="feedback-confirmed">
+              {currentFeedback?.helpful || (!currentFeedback && feedbackSent && !selectedReason) ? (
+                <span className="badge badge-ok">
+                  <Check size={11} aria-hidden="true" />Helpful answer · Thanks for your feedback
+                </span>
+              ) : (
+                <span className="badge badge-warn">
+                  <AlertCircle size={11} aria-hidden="true" />
+                  Feedback recorded
+                  {currentFeedback?.reason || selectedReason
+                    ? `: ${
+                        (currentFeedback?.reason ?? selectedReason) === 'incorrect'
+                          ? 'Incorrect'
+                          : (currentFeedback?.reason ?? selectedReason) === 'didnt_answer'
+                            ? "Didn't answer question"
+                            : (currentFeedback?.reason ?? selectedReason) === 'missing_info'
+                              ? 'Missing information'
+                              : 'Needs a human'
+                      }`
+                    : ''}
+                </span>
+              )}
+            </div>
+          ) : !feedbackOpen ? (
+            <div className="feedback-row">
+              <span className="feedback-hint">Was this answer helpful?</span>
+              <button
+                type="button"
+                className="feedback-pill"
+                onClick={() => {
+                  setFeedbackSent(true);
+                  onFeedback?.(message.id, { helpful: true });
+                }}
+                aria-label="Yes, this answer was helpful"
+              >
+                <ThumbsUp size={12} aria-hidden="true" />
+                <span>Yes</span>
+              </button>
+              <button
+                type="button"
+                className="feedback-pill"
+                onClick={() => setFeedbackOpen(true)}
+                aria-label="No, this answer was not helpful"
+              >
+                <ThumbsDown size={12} aria-hidden="true" />
+                <span>No</span>
+              </button>
+            </div>
+          ) : (
+            <div className="feedback-menu" role="region" aria-label="Feedback options">
+              <div className="feedback-menu-title">What went wrong?</div>
+              <div className="feedback-options-list">
+                {[
+                  { id: 'incorrect' as const, label: 'Incorrect' },
+                  { id: 'didnt_answer' as const, label: "Didn't answer my question" },
+                  { id: 'missing_info' as const, label: 'Missing information' },
+                  { id: 'need_human' as const, label: 'Need a human' },
+                ].map((opt) => (
+                  <label key={opt.id} className="feedback-radio-label">
+                    <input
+                      type="radio"
+                      name={`feedback-${message.id}`}
+                      value={opt.id}
+                      checked={selectedReason === opt.id}
+                      onChange={() => setSelectedReason(opt.id)}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="row" style={{ gap: 6, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => setFeedbackOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-xs"
+                  disabled={!selectedReason}
+                  onClick={() => {
+                    if (selectedReason) {
+                      setFeedbackSent(true);
+                      setFeedbackOpen(false);
+                      onFeedback?.(message.id, {
+                        helpful: false,
+                        reason: selectedReason,
+                      });
+                    }
+                  }}
+                >
+                  Submit feedback
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
       <div className="msg-meta">
         <span className="msg-role-tag">{roleLabel}</span>
         <span aria-hidden="true">·</span>

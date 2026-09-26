@@ -48,19 +48,19 @@ export default function App() {
     window.scrollTo(0, 0);
   }, []);
 
-  if (route.view === 'chat') {
-    return <CustomerCenter fresh={route.fresh} onExit={() => go('/')} />;
-  }
-
-  if (route.view === 'workspace') {
-    return <WorkspaceRoot onPreviewChat={() => go('/chat')} onNewConversation={() => go('/chat?new=1')} />;
-  }
-
   return (
-    <Landing
-      onOpenWorkspace={() => go('/app')}
-      onOpenChat={() => go('/chat')}
-    />
+    <ErrorBoundary>
+      {route.view === 'chat' ? (
+        <CustomerCenter fresh={route.fresh} onExit={() => go('/')} />
+      ) : route.view === 'workspace' ? (
+        <WorkspaceRoot onPreviewChat={() => go('/chat')} onNewConversation={() => go('/chat?new=1')} />
+      ) : (
+        <Landing
+          onOpenWorkspace={() => go('/app')}
+          onOpenChat={() => go('/chat')}
+        />
+      )}
+    </ErrorBoundary>
   );
 }
 

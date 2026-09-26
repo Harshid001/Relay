@@ -26,6 +26,18 @@ const MAX_NAME = 80;
 
 /* Brute-force guard: failed logins per IP+email in a sliding window. */
 const attempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_ATTEMPTS_ENTRIES = 5000;
+
+const attemptsCleanup = setInterval(() => {
+  const now = Date.now();
+  attempts.forEach((entry, key) => {
+    if (entry.resetAt <= now) attempts.delete(key);
+  });
+  if (attempts.size > MAX_ATTEMPTS_ENTRIES) {
+    attempts.clear();
+  }
+}, 5 * 60_000);
+attemptsCleanup.unref?.();
 
 function attemptKey(req: Request, email: string): string {
   return `${req.ip ?? 'unknown'}|${email.trim().toLowerCase()}`;
@@ -187,9 +199,13 @@ authRouter.post(
       return;
     }
     if (!req.user) return;
+    if (req.user.id === targetId) {
+      res.status(400).json({ error: 'Role not changed. You cannot change your own role.' });
+      return;
+    }
     const changed = await auth.setUserRole(req.user, targetId, role);
     if (!changed) {
-      res.status(400).json({ error: 'Role not changed. You cannot change your own role.' });
+      res.status(404).json({ error: 'User not found.' });
       return;
     }
     await audit(req, 'auth.role_changed', targetId, { role });

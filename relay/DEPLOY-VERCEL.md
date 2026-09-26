@@ -1,5 +1,8 @@
 # Deploying Relay to Vercel + MongoDB Atlas
 
+**Total cost: $0.** Relay's free plan (300 conversations · 1,000 AI answers per
+month, human handoffs always unlimited) runs entirely on free tiers:
+
 Serverless production topology — no VM to babysit:
 
 ```
@@ -46,10 +49,14 @@ and `vercel.json` routes `/api/*` to it while serving the Vite build from
    | `BOOTSTRAP_ADMIN_PASSWORD` | 12+ characters |
    | `NOTIFY_EMAILS` / `RESEND_API_KEY` | optional email alerts |
    | `CODEBUDDY_LIVE` | keep `false` — the live SDK path spawns a CLI process and is not serverless-safe |
+   | `FREE_CONVERSATIONS_LIMIT` | optional; default `300`, set `0` for unlimited |
+   | `FREE_AI_MESSAGES_LIMIT` | optional; default `1000`, set `0` for unlimited |
+   | `MONGODB_MAX_POOL_SIZE` | optional; default `10` on serverless, `20` on VM |
 
-3. **Deploy.** Verify: `curl https://<app>.vercel.app/api/health` →
-   `{"status":"ok",…}`. First login provisions nothing extra — the bootstrap
-   admin already exists.
+3. **Deploy.** Verify:
+   - Base health: `curl https://<app>.vercel.app/api/health` → `{"status":"ok",…}`
+   - System health: `curl https://<app>.vercel.app/api/health/system` → `{"status":"healthy","components":{…}}`
+   First login provisions nothing extra — the bootstrap admin already exists.
 4. Custom domain: Project → Domains → add it, then **append it to
    `ALLOWED_HOSTS`** and redeploy (unknown hosts get `403 Forbidden host`).
 
@@ -73,3 +80,4 @@ and `vercel.json` routes `/api/*` to it while serving the Vite build from
 |---|---|---|
 | Vercel Hobby | 100 GB bandwidth/mo, generous function time | support traffic, well under |
 | Atlas M0 | 512 MB storage, shared | conversations + FAQs, fine for years of demo use |
+| Relay free plan | 300 conversations · 1,000 AI answers/mo | raise or remove on your own deploy via env vars |

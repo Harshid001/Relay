@@ -2176,6 +2176,10 @@ mark.cite .cite-note {
 
 /* Landing page --------------------------------------------------- */
 
+.landing-hero .badge-demo {
+  align-self: center;
+}
+
 .landing {
   min-height: 100vh;
   display: flex;
@@ -2331,6 +2335,90 @@ mark.cite .cite-note {
   gap: 16px;
 }
 
+.landing-grid + .landing-grid {
+  margin-top: 16px;
+}
+
+.landing-grid-3 {
+  margin-top: 16px;
+}
+
+.landing-grid-2 {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.landing-handlist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.landing-handlist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ink, #0f172a);
+}
+
+.landing-handlist li::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--lime, #84cc16);
+}
+
+.landing-freecaps {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+.landing-ba-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border, #e5e7eb);
+}
+
+.landing-ba-row > span {
+  font-size: 14px;
+}
+
+.landing-ba-row > strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-ba-row .landing-ba-note {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted, #64748b);
+  margin-top: 2px;
+}
+
+.landing-ba-with {
+  border-color: var(--brand, #306645);
+}
+
+.landing-ba-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.landing-ba-sum svg {
+  color: var(--lime, #84cc16);
+}
+
 .feature-card {
   padding: 20px;
   display: flex;
@@ -2405,3 +2493,375 @@ mark.cite .cite-note {
     display: none;
   }
 }
+
+/* ==================================================================
+   Business-Value Dashboard: Story Card & Metrics
+   ================================================================== */
+
+.business-story-card {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-soft) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-card);
+}
+
+.story-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--primary);
+  background: var(--primary-tint);
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+}
+
+.story-heading {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  margin-bottom: 14px;
+}
+
+.story-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.story-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
+.story-pill strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.story-pill.highlight {
+  background: var(--lime-tint);
+  border-color: #c9e08e;
+  color: #244d34;
+}
+
+.story-pill.highlight strong {
+  color: #1a3c27;
+}
+
+.story-foot {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+  line-height: 1.4;
+}
+
+/* ==================================================================
+   First 5 Minutes Onboarding Guide
+   ================================================================== */
+
+.onboarding-card {
+  margin-bottom: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--border);
+}
+
+.onboarding-step {
+  background: var(--surface);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: background 0.15s ease;
+}
+
+.onboarding-step.done {
+  background: var(--surface-soft);
+}
+
+.step-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--ink-soft);
+  font-weight: 700;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.onboarding-step.done .step-badge {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.step-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  margin: 0;
+  flex: 1;
+}
+
+.step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ==================================================================
+   Message Feedback Loop (Thumbs Up/Down + What went wrong)
+   ================================================================== */
+
+.feedback-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.08);
+}
+
+.feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.feedback-hint {
+  font-weight: 500;
+}
+
+.feedback-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.feedback-pill:hover {
+  background: var(--bg);
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+
+.feedback-menu {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.feedback-menu-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.feedback-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.feedback-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.feedback-radio-label input {
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.feedback-confirmed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+/* ==================================================================
+   Funnel Instrumentation
+   ================================================================== */
+
+.funnel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.funnel-step {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+
+.funnel-step-idx {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.funnel-step-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.funnel-step-count {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: -0.02em;
+}
+
+.funnel-step-note {
+  font-size: 11px;
+  color: var(--ink-faint);
+  line-height: 1.3;
+}
+
+/* ==================================================================
+   Escalation Alert Banner
+   ================================================================== */
+
+.escalation-alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--danger-tint);
+  border: 1px solid #f2cfc6;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.escalation-alert-banner strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+/* ==================================================================
+   Knowledge Gaps List & Code Display
+   ================================================================== */
+
+.gap-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  transition: border-color 0.15s ease;
+}
+
+.gap-card:hover {
+  border-color: var(--border-strong);
+}
+
+.gap-query {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.gap-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--warn-tint);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: 4px;
+}
+
+.widget-code-box {
+  background: #1e2923;
+  color: #d1fae5;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 10px 0 14px;
+  user-select: all;
+}
+

@@ -553,11 +553,20 @@ interface FaqTermIndex {
 }
 
 const faqTermCache = new Map<string, FaqTermIndex>();
+const MAX_FAQ_CACHE = 2000;
+
+export function clearFaqTermCache(): void {
+  faqTermCache.clear();
+}
 
 function faqTerms(faq: FaqRecord): FaqTermIndex {
-  const cacheKey = faq.id + '|' + faq.title;
+  const cacheKey = `${faq.id}|${faq.title}|${(faq.tags ?? []).join(',')}|${faq.category ?? ''}`;
   const cached = faqTermCache.get(cacheKey);
   if (cached) return cached;
+
+  if (faqTermCache.size >= MAX_FAQ_CACHE) {
+    faqTermCache.clear();
+  }
 
   const set = new Set<string>();
   const list: string[] = [];

@@ -7,8 +7,11 @@ import type {
   Faq,
   FaqInput,
   Health,
+  KnowledgeGap,
   Message,
   Stats,
+  SystemHealthReport,
+  Usage,
 } from './service-types';
 
 const ADMIN_TOKEN_KEY = 'relay-admin-token';
@@ -96,6 +99,8 @@ const post = <T,>(path: string, body?: unknown, token?: string) =>
 export const api = {
   health: () => request<Health>('/api/health'),
 
+  getSystemHealth: () => request<SystemHealthReport>('/api/admin/system-health'),
+
   listConversations: () =>
     request<{ items: Conversation[]; total: number; limit: number; offset: number }>(
       '/api/admin/conversations',
@@ -105,6 +110,8 @@ export const api = {
     request<ConversationDetail>(`/api/admin/conversations/${encodeURIComponent(id)}`),
 
   getStats: (days: 7 | 30) => request<Stats>(`/api/admin/stats?days=${days}`),
+
+  getUsage: () => request<Usage>('/api/admin/usage'),
 
   reply: (id: string, content: string) =>
     post<Message>(`/api/admin/conversations/${encodeURIComponent(id)}/reply`, { content }),
@@ -124,6 +131,15 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
+
+  listKnowledgeGaps: () =>
+    request<{ items: KnowledgeGap[] }>('/api/admin/knowledge-gaps'),
+
+  resolveKnowledgeGap: (id: string) =>
+    post<{ ok: true }>(`/api/admin/knowledge-gaps/${encodeURIComponent(id)}/resolve`),
+
+  seedSampleKnowledge: () =>
+    post<{ items: Faq[] }>('/api/admin/onboarding/sample-knowledge'),
 };
 
 /* ---------------------------------------------------------------- *
@@ -194,6 +210,22 @@ export const customerApi = {
 
   rate: (id: string, token: string, score: number) =>
     post<Conversation>(`/api/conversations/${encodeURIComponent(id)}/rating`, { score }, token),
+
+  feedback: (
+    id: string,
+    token: string,
+    messageId: string,
+    feedback: {
+      helpful: boolean;
+      reason?: 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null;
+      comment?: string | null;
+    },
+  ) =>
+    post<{ ok: true; message: Message }>(
+      `/api/conversations/${encodeURIComponent(id)}/messages/${encodeURIComponent(messageId)}/feedback`,
+      feedback,
+      token,
+    ),
 };
 
 /* ---------------------------------------------------------------- *

@@ -8,6 +8,7 @@
  */
 
 import type { Response } from 'express';
+import { telemetry } from './telemetry.js';
 
 export type WorkspaceEvent =
   | { type: 'conversation'; id: string; status: string | null }
@@ -23,24 +24,41 @@ const clients = new Map<number, Client>();
 
 /** Publishes an event to every connected admin client. Never throws. */
 export function publish(event: WorkspaceEvent): void {
+  telemetry.setSseSubscribers(clients.size);
   if (clients.size === 0) return;
   const payload = `event: workspace\ndata: ${JSON.stringify(event)}\n\n`;
   for (const client of clients.values()) {
     try {
+      if (client.res.writableEnded || client.res.destroyed) {
+        clients.delete(client.id);
+        continue;
+      }
       client.res.write(payload);
     } catch {
+      telemetry.recordSseFailure();
       clients.delete(client.id);
     }
   }
+  telemetry.setSseSubscribers(clients.size);
 }
 
 /** Registers an SSE response; returns a cleanup function. */
 export function subscribe(res: Response): () => void {
   const id = nextClientId++;
   clients.set(id, { id, res });
-  return () => {
+  telemetry.setSseSubscribers(clients.size);
+
+  const cleanup = () => {
     clients.delete(id);
+    telemetry.setSseSubscribers(clients.size);
   };
+
+  res.on('error', () => {
+    telemetry.recordSseFailure();
+    cleanup();
+  });
+
+  return cleanup;
 }
 
 export function subscriberCount(): number {

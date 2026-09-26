@@ -77,19 +77,52 @@ let database: Db | null = null;
 
 export async function connectToDatabase(): Promise<Db> {
   if (database) return database;
-  connectPromise ??= (async () => {
-    const created = client ?? new MongoClient(MONGODB_URI, {
-      serverSelectionTimeoutMS: 10_000,
-      maxPoolSize: 20,
+  try {
+    connectPromise ??= (async () => {
+      const defaultPoolSize = process.env.VERCEL ? 10 : 20;
+      const configuredPoolSize = Number(process.env.MONGODB_MAX_POOL_SIZE);
+      const maxPoolSize =
+        Number.isFinite(configuredPoolSize) && configuredPoolSize > 0
+          ? configuredPoolSize
+          : defaultPoolSize;
+
+      const created = client ?? new MongoClient(MONGODB_URI, {
+        serverSelectionTimeoutMS: 10_000,
+        maxPoolSize,
+      });
+      await created.connect();
+      client = created;
+      return created;
+    })().catch((err) => {
+      connectPromise = null;
+      client = null;
+      database = null;
+      throw err;
     });
-    await created.connect();
-    client = created;
-    return created;
-  })();
-  const connected = await connectPromise;
-  database = connected.db(DB_NAME);
-  await ensureIndexes(database);
-  return database;
+
+    const connected = await connectPromise;
+    database = connected.db(DB_NAME);
+    await ensureIndexes(database);
+    return database;
+  } catch (error) {
+    connectPromise = null;
+    client = null;
+    database = null;
+    throw error;
+  }
+}
+
+/** Measures database latency; never throws. */
+export async function pingDatabase(): Promise<{ ok: boolean; latencyMs: number }> {
+  if (!database) return { ok: false, latencyMs: 0 };
+  const start = process.hrtime.bigint();
+  try {
+    await database.command({ ping: 1 });
+    const latencyMs = Number(process.hrtime.bigint() - start) / 1e6;
+    return { ok: true, latencyMs: Math.round(latencyMs * 10) / 10 };
+  } catch {
+    return { ok: false, latencyMs: 0 };
+  }
 }
 
 /** For tests and graceful shutdown. */
@@ -129,6 +162,9 @@ async function ensureIndexes(db: Db): Promise<void> {
     db.collection('faqs').createIndexes([
       { key: { category: 1, title: 1 } },
     ]),
+    db.collection('knowledge_gaps').createIndexes([
+      { key: { status: 1, created_at: -1 } },
+    ]),
   ]);
 }
 
@@ -156,6 +192,13 @@ interface ConversationDoc {
   updated_at: string;
 }
 
+export interface MessageFeedbackDoc {
+  helpful: boolean;
+  reason?: 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null;
+  comment?: string | null;
+  created_at: string;
+}
+
 interface MessageDoc {
   _id: string;
   conversation_id: string;
@@ -164,6 +207,7 @@ interface MessageDoc {
   provider: string | null;
   sources: SourceRef[];
   tool: ToolEventRecord | null;
+  feedback?: MessageFeedbackDoc | null;
   created_at: string;
 }
 
@@ -183,6 +227,20 @@ interface FaqDoc {
   updated_at: string;
 }
 
+export interface KnowledgeGapDoc {
+  _id: string;
+  conversation_id: string;
+  message_id: string;
+  query: string;
+  answer?: string;
+  comment?: string | null;
+  reason: string;
+  sources_used: SourceRef[];
+  status: 'open' | 'resolved';
+  created_at: string;
+  resolved_at?: string | null;
+}
+
 interface MetaDoc {
   _id: string;
   value: string;
@@ -199,6 +257,9 @@ function idempotencyKeys(): Collection<IdempotencyDoc> {
 }
 function faqsCollection(): Collection<FaqDoc> {
   return database!.collection<FaqDoc>('faqs');
+}
+function knowledgeGaps(): Collection<KnowledgeGapDoc> {
+  return database!.collection<KnowledgeGapDoc>('knowledge_gaps');
 }
 function meta(): Collection<MetaDoc> {
   return database!.collection<MetaDoc>('meta');
@@ -229,6 +290,12 @@ export interface Conversation {
   escalationReason: string | null;
 }
 
+export interface MessageFeedback {
+  helpful: boolean;
+  reason?: 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null;
+  comment?: string | null;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -239,6 +306,21 @@ export interface Message {
   /** Scripted tool call performed during this turn, if any. */
   tool?: ToolEventRecord | null;
   provider?: MessageProvider;
+  feedback?: MessageFeedback | null;
+}
+
+export interface KnowledgeGap {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  query: string;
+  answer?: string;
+  comment?: string | null;
+  reason: string;
+  sourcesUsed: SourceRef[];
+  status: 'open' | 'resolved';
+  createdAt: string;
+  resolvedAt?: string | null;
 }
 
 export interface Faq {
@@ -346,6 +428,13 @@ function mapMessage(doc: WithId<MessageDoc>): Message {
     tool: doc.tool ?? null,
   };
   if (doc.provider) message.provider = doc.provider as MessageProvider;
+  if (doc.feedback) {
+    message.feedback = {
+      helpful: doc.feedback.helpful,
+      reason: doc.feedback.reason ?? null,
+      comment: doc.feedback.comment ?? null,
+    };
+  }
   return message;
 }
 
@@ -565,6 +654,103 @@ export async function getMessages(conversationId: string): Promise<Message[]> {
   return docs.map(mapMessage);
 }
 
+export async function recordMessageFeedback(
+  conversationId: string,
+  messageId: string,
+  feedback: {
+    helpful: boolean;
+    reason?: 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null;
+    comment?: string | null;
+  },
+): Promise<Message | null> {
+  const createdAt = nowIso();
+  const feedbackDoc: MessageFeedbackDoc = {
+    helpful: feedback.helpful,
+    reason: feedback.reason ?? null,
+    comment: feedback.comment ?? null,
+    created_at: createdAt,
+  };
+
+  await messages().updateOne(
+    { _id: messageId, conversation_id: conversationId },
+    { $set: { feedback: feedbackDoc } },
+  );
+
+  const updated = await messages().findOne({ _id: messageId, conversation_id: conversationId });
+  if (!updated) return null;
+
+  if (!feedback.helpful) {
+    const priorUser = await messages().findOne(
+      { conversation_id: conversationId, role: 'user', created_at: { $lte: updated.created_at } },
+      { sort: { created_at: -1 } },
+    );
+    await knowledgeGaps().insertOne({
+      _id: newId(),
+      conversation_id: conversationId,
+      message_id: messageId,
+      query: priorUser?.content ?? 'Customer question',
+      answer: updated.content,
+      comment: feedback.comment ?? null,
+      reason: feedback.reason ?? 'unhelpful_answer',
+      sources_used: updated.sources ?? [],
+      status: 'open',
+      created_at: createdAt,
+    });
+  }
+
+  return mapMessage(updated);
+}
+
+export async function listKnowledgeGaps(): Promise<KnowledgeGap[]> {
+  const docs = await knowledgeGaps().find().sort({ created_at: -1 }).limit(100).toArray();
+  return docs.map((doc) => ({
+    id: doc._id,
+    conversationId: doc.conversation_id,
+    messageId: doc.message_id,
+    query: doc.query,
+    answer: doc.answer,
+    comment: doc.comment ?? null,
+    reason: doc.reason,
+    sourcesUsed: doc.sources_used ?? [],
+    status: doc.status,
+    createdAt: doc.created_at,
+    resolvedAt: doc.resolved_at ?? null,
+  }));
+}
+
+export async function resolveKnowledgeGap(id: string): Promise<boolean> {
+  const result = await knowledgeGaps().updateOne(
+    { _id: id },
+    { $set: { status: 'resolved', resolved_at: nowIso() } },
+  );
+  return result.matchedCount > 0;
+}
+
+export async function seedSampleKnowledge(): Promise<Faq[]> {
+  const existing = await faqsCollection().find().toArray();
+  const existingIds = new Set(existing.map((f) => f._id));
+  const toInsert: FaqDoc[] = [];
+
+  for (const faq of SEED_FAQS) {
+    if (!existingIds.has(faq.id)) {
+      toInsert.push({
+        _id: faq.id,
+        title: faq.title,
+        answer: faq.answer,
+        category: faq.category,
+        tags: faq.tags,
+        updated_at: nowIso(),
+      });
+    }
+  }
+
+  if (toInsert.length > 0) {
+    await faqsCollection().insertMany(toInsert);
+  }
+
+  return listFaqs();
+}
+
 /* ------------------------------------------------------------------ *
  * Idempotency
  * ------------------------------------------------------------------ */
@@ -585,6 +771,10 @@ export async function recordIdempotencyKey(conversationId: string, clientId: str
 /* ------------------------------------------------------------------ *
  * FAQs
  * ------------------------------------------------------------------ */
+
+export async function countFaqs(): Promise<number> {
+  return faqsCollection().countDocuments();
+}
 
 export async function listFaqs(): Promise<Faq[]> {
   const docs = await faqsCollection().find().sort({ category: 1, title: 1 }).toArray();
@@ -647,6 +837,9 @@ export interface StatsVolumePoint {
 
 export interface StatsResult {
   total: number;
+  resolved: number;
+  aiResolutions: number;
+  humanHandoffs: number;
   resolutionRate: number;
   csat: number | null;
   avgResponseSeconds: number | null;
@@ -655,6 +848,16 @@ export interface StatsResult {
   volume: StatsVolumePoint[];
   intents: Array<{ intent: Intent; count: number }>;
   satisfaction: Array<{ score: number; count: number }>;
+}
+
+/** Conversations created since the given instant (free-plan metering). */
+export async function countConversationsSince(windowStart: Date): Promise<number> {
+  return conversations().countDocuments({ created_at: { $gte: windowStart.toISOString() } });
+}
+
+/** Assistant replies generated since the given instant (free-plan metering). */
+export async function countAssistantMessagesSince(windowStart: Date): Promise<number> {
+  return messages().countDocuments({ role: 'assistant', created_at: { $gte: windowStart.toISOString() } });
 }
 
 function localDayKey(date: Date): string {
@@ -774,8 +977,16 @@ export async function getStats(days: number): Promise<StatsResult> {
   const volume: StatsVolumePoint[] = [];
   buckets.forEach((point) => volume.push(point));
 
+  const humanHandoffs = conversationDocs.filter(
+    (doc) => doc.human_handled || doc.status === 'waiting',
+  ).length;
+  const aiResolutions = Math.max(0, total - humanHandoffs);
+
   return {
     total,
+    resolved: resolvedCount,
+    aiResolutions,
+    humanHandoffs,
     resolutionRate,
     csat,
     avgResponseSeconds,

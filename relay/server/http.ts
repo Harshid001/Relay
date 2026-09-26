@@ -109,13 +109,17 @@ const counters = {
 const latencyBuckets = [5, 25, 100, 500, 2000];
 const latencyCounts = new Array(latencyBuckets.length + 1).fill(0) as number[];
 
+import { telemetry } from './telemetry.js';
+
 export function metricsMiddleware(): RequestHandler {
   return (_req: Request, res: Response, next: NextFunction) => {
     const start = process.hrtime.bigint();
     counters.requestsTotal += 1;
     res.on('finish', () => {
-      if (res.statusCode >= 500) counters.errorsTotal += 1;
       const ms = Number(process.hrtime.bigint() - start) / 1e6;
+      if (res.statusCode >= 500) counters.errorsTotal += 1;
+      telemetry.recordHttp(res.statusCode, ms);
+
       const index = latencyBuckets.findIndex((bucket) => ms < bucket);
       latencyCounts[index === -1 ? latencyBuckets.length : index] += 1;
     });

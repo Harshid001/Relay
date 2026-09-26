@@ -335,6 +335,63 @@ test('admin SSE stream broadcasts conversation events in real time', async () =>
   }
 });
 
+test('killer demo flow: multi-policy citation, refuse unanswerable refund without guessing, message feedback, knowledge gap tracking', async () => {
+  const session = await create();
+
+  // Step 1: My order hasn't arrived and I want a refund.
+  const turn1 = await send(session, "My order hasn't arrived and I want a refund.");
+  assert.equal(turn1.status, 200);
+  const bot1 = turn1.data.messages.findLast((m: any) => m.role === 'assistant');
+  assert.ok(bot1);
+  assert.ok(bot1.sources.length >= 2);
+  const titles = bot1.sources.map((s: any) => s.title.toLowerCase());
+  assert.ok(titles.some((t: string) => t.includes('refund') || t.includes('return')));
+  assert.ok(titles.some((t: string) => t.includes('shipping') || t.includes('tracking') || t.includes('delivery')));
+
+  // Step 2: Unanswerable inquiry: "I received the wrong product. Can you issue the refund now?"
+  const turn2 = await send(session, 'I received the wrong product. Can you issue the refund now?');
+  assert.equal(turn2.status, 200);
+  const bot2 = turn2.data.messages.findLast((m: any) => m.role === 'assistant');
+  assert.ok(bot2);
+  // Zero fabricated citations
+  assert.equal(bot2.sources.length, 0);
+  assert.match(bot2.content, /safely resolve|support/i);
+
+  // Step 3: Message feedback endpoint: customer submits negative feedback with 'need_human'
+  const fbRes = await req(
+    `/api/conversations/${session.id}/messages/${bot2.id}/feedback`,
+    { helpful: false, reason: 'need_human', comment: 'Need an agent to verify the wrong item' },
+    { 'x-conversation-token': session.token },
+  );
+  assert.equal(fbRes.status, 200);
+  assert.equal(fbRes.data.message.feedback.helpful, false);
+  assert.equal(fbRes.data.message.feedback.reason, 'need_human');
+
+  // Conversation should auto-escalate on 'need_human'
+  const convAfterFb = await req(`/api/conversations/${session.id}`, undefined, { 'x-conversation-token': session.token });
+  assert.equal(convAfterFb.data.conversation.status, 'waiting');
+
+  // Step 4: Admin knowledge gaps endpoint lists the newly recorded gap
+  const gaps = await req('/api/admin/knowledge-gaps');
+  assert.equal(gaps.status, 200);
+  const gap = gaps.data.items.find((g: any) => g.messageId === bot2.id);
+  assert.ok(gap);
+  assert.equal(gap.reason, 'need_human');
+  assert.equal(gap.status, 'open');
+
+  // Step 5: Admin resolves the knowledge gap
+  const resolved = await req(`/api/admin/knowledge-gaps/${gap.id}/resolve`, {});
+  assert.equal(resolved.status, 200);
+  const gapsAfter = await req('/api/admin/knowledge-gaps');
+  const resolvedGap = gapsAfter.data.items.find((g: any) => g.id === gap.id);
+  assert.equal(resolvedGap.status, 'resolved');
+
+  // Step 6: Admin seeds sample knowledge
+  const seeded = await req('/api/admin/onboarding/sample-knowledge', {});
+  assert.equal(seeded.status, 200);
+  assert.ok(seeded.data.items.length >= 6);
+});
+
 test('account auth: bootstrap, login, session cookies, RBAC and logout', async () => {
   const original = base;
   const instance = await launch({
@@ -342,6 +399,7 @@ test('account auth: bootstrap, login, session cookies, RBAC and logout', async (
     BOOTSTRAP_ADMIN_EMAIL: 'owner@relay.test',
     BOOTSTRAP_ADMIN_PASSWORD: 'bootstrap-pass-123',
     BOOTSTRAP_ADMIN_NAME: 'Owner One',
+    MONGODB_DB: `relay_test_auth_${Date.now()}`,
   });
   try {
     base = instance.url;
@@ -403,3 +461,175 @@ test('account auth: bootstrap, login, session cookies, RBAC and logout', async (
     await stop(instance.proc);
   }
 });
+
+test('tenant & customer isolation: conversations, messages, and ratings are strictly token-isolated', async () => {
+  // Create Customer A conversation
+  const custA = await create();
+  // Create Customer B conversation
+  const custB = await create();
+  assert.notEqual(custA.id, custB.id);
+  assert.notEqual(custA.token, custB.token);
+
+  // Customer A can read Conversation A
+  const getA = await req(`/api/conversations/${custA.id}`, undefined, { 'x-conversation-token': custA.token });
+  assert.equal(getA.status, 200);
+  assert.equal(getA.data.conversation.id, custA.id);
+
+  // Customer B with Token B attempting to access Conversation A receives 404 (does NOT leak existence)
+  const crossGet = await req(`/api/conversations/${custA.id}`, undefined, { 'x-conversation-token': custB.token });
+  assert.equal(crossGet.status, 404);
+
+  // Anonymous request without token receives 404 (timing-safe existence mask)
+  const anonGet = await req(`/api/conversations/${custA.id}`, undefined, {});
+  assert.equal(anonGet.status, 404);
+
+  // Customer B attempting to send message to Conversation A receives 404
+  const crossSend = await req(
+    `/api/conversations/${custA.id}/messages`,
+    { content: 'Hacked message' },
+    { 'x-conversation-token': custB.token },
+    'POST',
+  );
+  assert.equal(crossSend.status, 404);
+
+  // Customer B attempting to rate Conversation A receives 404
+  const crossRate = await req(
+    `/api/conversations/${custA.id}/rating`,
+    { score: 1 },
+    { 'x-conversation-token': custB.token },
+    'POST',
+  );
+  assert.equal(crossRate.status, 404);
+
+  // Customer B attempting to escalate Conversation A receives 404
+  const crossEscalate = await req(
+    `/api/conversations/${custA.id}/escalate`,
+    { reason: 'Customer B escalation' },
+    { 'x-conversation-token': custB.token },
+    'POST',
+  );
+  assert.equal(crossEscalate.status, 404);
+});
+
+test('security: remote requests never receive implicit admin even without ADMIN_TOKEN or users', async () => {
+  const original = base;
+  const instance = await launch({
+    ADMIN_TOKEN: '',
+    MONGODB_DB: `relay_test_remote_${Date.now()}`,
+  });
+  try {
+    base = instance.url;
+
+    // A remote IP header (e.g. from an external client via reverse proxy)
+    const remoteHeaders = { 'x-forwarded-for': '198.51.100.25' };
+
+    // Remote request to admin route without token must be rejected with 401
+    const remoteAdmin = await req('/api/admin/conversations', undefined, remoteHeaders);
+    assert.equal(remoteAdmin.status, 401);
+
+    // Loopback without x-forwarded-for will get implicit admin when no accounts exist (local dev convenience)
+    const localAdmin = await req('/api/admin/conversations', undefined, {});
+    assert.equal(localAdmin.status, 200);
+  } finally {
+    base = original;
+    await stop(instance.proc);
+  }
+});
+
+test('api routing: supports both legacy unwrapped /api and enveloped /api/v1', async () => {
+  // /api/health returns unwrapped object
+  const legacyHealth = await req('/api/health', undefined, {});
+  assert.equal(legacyHealth.status, 200);
+  assert.equal(legacyHealth.data.mode, 'demo');
+  assert.equal(legacyHealth.data.status, 'ok');
+  assert.equal(legacyHealth.data.success, undefined);
+
+  // /api/v1/health returns enveloped { success: true, data: { ... } }
+  const v1Health = await req('/api/v1/health', undefined, {});
+  assert.equal(v1Health.status, 200);
+  assert.equal(v1Health.data.success, true);
+  assert.equal(v1Health.data.data.mode, 'demo');
+  assert.equal(v1Health.data.data.status, 'ok');
+
+  // /api/v1/conversations creates conversation and wraps result
+  const v1Conv = await req('/api/v1/conversations', { customer: 'V1 Customer', email: 'v1@test.local' }, {});
+  assert.equal(v1Conv.status, 201);
+  assert.equal(v1Conv.data.success, true);
+  assert.ok(v1Conv.data.data.conversation);
+  assert.ok(v1Conv.data.data.accessToken);
+
+  // /api/v1 envelope on error
+  const v1Err = await req(`/api/v1/conversations/${v1Conv.data.data.conversation.id}`, undefined, {});
+  assert.equal(v1Err.status, 404);
+  assert.equal(v1Err.data.success, false);
+  assert.ok(v1Err.data.error);
+});
+
+test('observability: /admin/system-health and /health/system report all subsystems and telemetry', async () => {
+  // Public health/system endpoint
+  const pub = await req('/api/health/system', undefined, {});
+  assert.equal(pub.status, 200);
+  assert.equal(pub.data.status, 'healthy');
+  assert.equal(pub.data.components.api.status, 'healthy');
+  assert.equal(pub.data.components.database.status, 'healthy');
+  assert.equal(pub.data.components.aiProvider.status, 'healthy');
+  assert.equal(pub.data.components.realtimeSse.status, 'healthy');
+  assert.equal(pub.data.components.knowledgeBase.status, 'healthy');
+  assert.ok(typeof pub.data.uptimeSeconds === 'number');
+
+  // Telemetry sub-objects
+  assert.ok(pub.data.telemetry.ai);
+  assert.ok(pub.data.telemetry.http);
+  assert.ok(pub.data.telemetry.database);
+  assert.ok(pub.data.telemetry.realtimeSse);
+  assert.ok(pub.data.telemetry.knowledgeBase);
+
+  // Admin system-health requires auth
+  const anon = await req('/api/admin/system-health', undefined, {});
+  assert.equal(anon.status, 401);
+
+  const authed = await req('/api/admin/system-health', undefined, adminHeaders);
+  assert.equal(authed.status, 200);
+  assert.equal(authed.data.status, 'healthy');
+  assert.ok(authed.data.telemetry.http.requestsTotal > 0);
+});
+
+test('plan limits: AI message limit preserves user message, escalates to waiting, and returns 429', async () => {
+  const original = base;
+  const instance = await launch({
+    FREE_AI_MESSAGES_LIMIT: '1',
+    MONGODB_DB: `relay_test_limits_${Date.now()}`,
+  });
+  try {
+    base = instance.url;
+    const session = await create();
+
+    // 1st message: within limit
+    const turn1 = await send(session, 'What is the return policy?');
+    assert.equal(turn1.status, 200);
+
+    // 2nd message: exceeds AI message limit
+    const turn2 = await send(session, 'Can I exchange my item instead?');
+    assert.equal(turn2.status, 429);
+    assert.equal(turn2.data.aiMessagesLimitReached, true);
+
+    // Verify conversation was preserved, transitioned to waiting, and has escalation note
+    const detail = await req(`/api/conversations/${session.id}`, undefined, { 'x-conversation-token': session.token });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.data.conversation.status, 'waiting');
+    assert.equal(detail.data.conversation.escalationReason, 'Monthly AI message cap reached');
+
+    // Customer message was saved
+    const customerMsg = detail.data.messages.find((m: any) => m.content === 'Can I exchange my item instead?');
+    assert.ok(customerMsg);
+
+    // Assistant notice was saved
+    const assistantMsg = detail.data.messages.find((m: any) => m.role === 'assistant' && m.content.includes('monthly limit'));
+    assert.ok(assistantMsg);
+  } finally {
+    base = original;
+    await stop(instance.proc);
+  }
+});
+
+

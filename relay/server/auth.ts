@@ -128,6 +128,7 @@ export async function bootstrapAdminFromEnv(): Promise<void> {
     created_at: new Date().toISOString(),
     last_login_at: null,
   });
+  cachedHasUsers = true;
   console.log(`[relay] bootstrapped admin account for ${email}`);
 }
 
@@ -232,6 +233,35 @@ declare module 'express-serve-static-core' {
   }
 }
 
+let cachedHasUsers: boolean | null = null;
+
+export function resetAuthCacheForTests(): void {
+  cachedHasUsers = null;
+}
+
+export function isLoopbackRequest(req: Request): boolean {
+  const forwarded = req.get('x-forwarded-for');
+  if (forwarded) {
+    const first = forwarded.split(',')[0].trim().toLowerCase();
+    if (
+      first !== '127.0.0.1' &&
+      first !== '::1' &&
+      first !== 'localhost' &&
+      !first.endsWith('127.0.0.1')
+    ) {
+      return false;
+    }
+  }
+  const ip = (req.ip ?? req.socket?.remoteAddress ?? '').trim().toLowerCase();
+  return (
+    ip === '127.0.0.1' ||
+    ip === '::1' ||
+    ip === '::ffff:127.0.0.1' ||
+    ip === 'localhost' ||
+    ip.endsWith('127.0.0.1')
+  );
+}
+
 /**
  * Resolves the current user (cookie session) when one exists. Legacy mode:
  * if the database has no users at all, requests carrying the valid
@@ -250,7 +280,14 @@ export const attachUser: RequestHandler = (req, res, next) => {
       }
     }
 
-    const hasUsers = (await users().countDocuments()) > 0;
+    const hasUsers =
+      cachedHasUsers ??
+      (await (async () => {
+        const count = await users().countDocuments();
+        if (count > 0) cachedHasUsers = true;
+        return count > 0;
+      })());
+
     if (!hasUsers) {
       const legacy = req.get('x-admin-token') ?? '';
       const expected = (process.env.ADMIN_TOKEN ?? '').trim();
@@ -261,9 +298,9 @@ export const attachUser: RequestHandler = (req, res, next) => {
         if (crypto.timingSafeEqual(a, b)) {
           req.user = implicitAdmin();
         }
-      } else if (!expected && path.startsWith('/api/admin')) {
+      } else if (!expected && (path.startsWith('/api/admin') || path.startsWith('/api/v1/admin')) && isLoopbackRequest(req)) {
         // Open demo mode (no ADMIN_TOKEN, no accounts): admin routes stay
-        // reachable on loopback exactly as before the account system existed.
+        // reachable on loopback only. Remote requests fail closed (401).
         req.user = implicitAdmin();
       }
     }
@@ -341,6 +378,7 @@ export async function createUser(input: CreateUserInput): Promise<SessionUser> {
     last_login_at: null,
   };
   await users().insertOne(doc);
+  cachedHasUsers = true;
   return { id: doc._id, email: doc.email, name: doc.name, role: doc.role };
 }
 

@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import * as store from './db.js';
-import { INTENTS, type Intent } from './knowledge.js';
+import { clearFaqTermCache, INTENTS, type Intent } from './knowledge.js';
 import {
   DEFAULT_ASSIGNEE,
   generateDemoTurn,
@@ -34,10 +34,19 @@ import {
 } from './agent.js';
 import * as auth from './auth.js';
 import { authRouter } from './auth-routes.js';
-import { publish, subscribe } from './events.js';
+import { publish, subscribe, subscriberCount } from './events.js';
 import { notifyOnEvent } from './notify.js';
 import { requestLogging } from './logger.js';
 import { envelope, fail, metricsMiddleware, metricsText, ok } from './http.js';
+import { telemetry } from './telemetry.js';
+import {
+  METERING_ENABLED,
+  aiMessagesLimitReached,
+  conversationsLimitReached,
+  currentMonthWindow,
+  getUsageSummary,
+  limitMessage,
+} from './plan.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -181,33 +190,9 @@ app.use(express.json({ limit: '32kb' }));
 app.use(requestLogging());
 app.use(metricsMiddleware());
 
-// ---- Versioned API ---------------------------------------------------
-// /api/v1/* serves the enveloped contract ({ success, data | error }).
-// The legacy /api/* mount below stays unwrapped for backward compatibility.
-const v1 = express.Router();
-v1.use(envelope);
-app.use('/api/v1', v1);
-
-// Deep health + metrics are unversioned, cheap, and probe-friendly.
-app.get('/api/health', async (_req: Request, res: Response) => {
-  let database = 'down';
-  try {
-    await store.getDb().command({ ping: 1 });
-    database = 'up';
-  } catch {
-    database = 'down';
-  }
-  res.status(database === 'up' ? 200 : 503).json({
-    status: database === 'up' ? 'ok' : 'degraded',
-    mode: MODE,
-    checks: { database },
-    adminAuthRequired: ADMIN_AUTH_REQUIRED,
-  });
-});
-
-app.get('/api/metrics', (_req: Request, res: Response) => {
-  res.type('text/plain; version=0.0.4').send(metricsText());
-});
+// ---- API Router (/api/* and /api/v1/*) -------------------------------
+// Mounts both legacy unwrapped (/api) and versioned enveloped (/api/v1).
+export const apiRouter = express.Router();
 
 /* ------------------------------------------------------------------ *
  * Realtime: admin Server-Sent Events stream
@@ -368,16 +353,63 @@ function parseTags(value: unknown): string[] | null {
 const busyConversations = new Set<string>();
 
 /* ------------------------------------------------------------------ *
- * Health
+ * Health, Metrics & System Health
  * ------------------------------------------------------------------ */
 
-// Auth: attach user, then the auth router.
-app.use(auth.attachUser);
-app.use('/api/auth', authRouter);
+apiRouter.get('/health', wrap(async (_req: Request, res: Response) => {
+  const ping = await store.pingDatabase();
+  const database = ping.ok ? 'up' : 'down';
+  res.status(database === 'up' ? 200 : 503).json({
+    status: database === 'up' ? 'ok' : 'degraded',
+    mode: MODE,
+    checks: { database },
+    adminAuthRequired: ADMIN_AUTH_REQUIRED,
+    plan: 'free',
+  });
+}));
 
-// Admin SSE stream - must be registered after attachUser so the session
-// cookie is resolved before the guard runs.
-app.get('/api/admin/events', requireUser, (req: Request, res: Response) => {
+apiRouter.get('/metrics', (_req: Request, res: Response) => {
+  res.type('text/plain; version=0.0.4').send(metricsText());
+});
+
+apiRouter.get(
+  '/admin/system-health',
+  requireUser,
+  wrap(async (_req: Request, res: Response) => {
+    const ping = await store.pingDatabase();
+    const faqCount = await store.countFaqs();
+    const report = telemetry.getSnapshot({
+      dbConnected: ping.ok,
+      dbPingLatencyMs: ping.ok ? ping.latencyMs : null,
+      isLive: LIVE,
+      faqCount,
+      activeSseCount: subscriberCount(),
+    });
+    res.status(report.status === 'unhealthy' ? 503 : 200).json(report);
+  }),
+);
+
+apiRouter.get(
+  '/health/system',
+  wrap(async (_req: Request, res: Response) => {
+    const ping = await store.pingDatabase();
+    const faqCount = await store.countFaqs();
+    const report = telemetry.getSnapshot({
+      dbConnected: ping.ok,
+      dbPingLatencyMs: ping.ok ? ping.latencyMs : null,
+      isLive: LIVE,
+      faqCount,
+      activeSseCount: subscriberCount(),
+    });
+    res.status(report.status === 'unhealthy' ? 503 : 200).json(report);
+  }),
+);
+
+// Auth router mounted on /api/auth and /api/v1/auth
+apiRouter.use('/auth', authRouter);
+
+// Admin SSE stream
+apiRouter.get('/admin/events', requireUser, (req: Request, res: Response) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
@@ -405,7 +437,7 @@ app.get('/api/admin/events', requireUser, (req: Request, res: Response) => {
  * Public FAQs
  * ------------------------------------------------------------------ */
 
-app.get('/api/faqs', apiLimiter, wrap(async (_req, res) => {
+apiRouter.get('/faqs', apiLimiter, wrap(async (_req, res) => {
   res.json(await store.listFaqs());
 }));
 
@@ -413,7 +445,21 @@ app.get('/api/faqs', apiLimiter, wrap(async (_req, res) => {
  * Customer conversations
  * ------------------------------------------------------------------ */
 
-app.post('/api/conversations', writeLimiter, wrap(async (req, res) => {
+apiRouter.post('/conversations', writeLimiter, wrap(async (req, res) => {
+  // Free-plan guard: new conversations stop at the monthly cap; existing
+  // threads and human hand-offs stay available.
+  if (METERING_ENABLED) {
+    const { start } = currentMonthWindow();
+    const used = await store.countConversationsSince(start);
+    const hit = conversationsLimitReached(used);
+    if (hit) {
+      telemetry.recordPlanLimitRejection('conversations');
+      res.setHeader('Retry-After', String(Math.max(1, 3600)));
+      res.status(429).json({ error: limitMessage(hit) });
+      return;
+    }
+  }
+
   const body = asRecord(req.body);
 
   const customer = readOptionalString(body.customer, MAX_CUSTOMER);
@@ -433,8 +479,8 @@ app.post('/api/conversations', writeLimiter, wrap(async (req, res) => {
   res.status(201).json({ conversation: created.conversation, accessToken: created.accessToken });
 }));
 
-app.get(
-  '/api/conversations/:id',
+apiRouter.get(
+  '/conversations/:id',
   apiLimiter,
   requireConversationAccess,
   wrap(async (req, res) => {
@@ -447,8 +493,8 @@ app.get(
   }),
 );
 
-app.post(
-  '/api/conversations/:id/messages',
+apiRouter.post(
+  '/conversations/:id/messages',
   messageLimiter,
   requireConversationAccess,
   wrap(async (req, res) => {
@@ -490,6 +536,40 @@ app.post(
         error: 'A reply is already being generated for this conversation. Please wait.',
       });
       return;
+    }
+
+    // Free-plan guard: assistant turns stop at the monthly cap. Storing the
+    // customer's message and reaching a human always stay available.
+    if (METERING_ENABLED && existing.status !== 'waiting') {
+      const { start } = currentMonthWindow();
+      const used = await store.countAssistantMessagesSince(start);
+      const hit = aiMessagesLimitReached(used);
+      if (hit) {
+        telemetry.recordPlanLimitRejection('ai_messages');
+        await store.addMessage({ conversationId, role: 'user', content });
+        await store.addMessage({
+          conversationId,
+          role: 'assistant',
+          content: limitMessage(hit),
+        });
+        await store.addMessage({
+          conversationId,
+          role: 'system',
+          content: 'Escalated to human queue: Monthly assistant message cap reached.',
+        });
+        const updated = await store.updateConversation(conversationId, {
+          status: 'waiting',
+          escalationReason: 'Monthly AI message cap reached',
+        });
+        emitConversation(conversationId, 'waiting', updated?.title ?? undefined);
+        res.status(429).json({
+          error: limitMessage(hit),
+          aiMessagesLimitReached: true,
+          conversation: updated,
+          messages: await store.getMessages(conversationId),
+        });
+        return;
+      }
     }
 
     busyConversations.add(conversationId);
@@ -554,6 +634,7 @@ app.post(
       }
 
       let turn: AgentTurnResult;
+      const aiStart = process.hrtime.bigint();
       try {
         if (LIVE) {
           turn = await generateLiveTurn({
@@ -571,7 +652,13 @@ app.post(
             previousIntent,
           });
         }
+        const aiDurationMs = Number(process.hrtime.bigint() - aiStart) / 1e6;
+        telemetry.recordAiTurn(true, aiDurationMs);
+        telemetry.recordKbSearch(turn.sources.length > 0);
       } catch (error) {
+        const aiDurationMs = Number(process.hrtime.bigint() - aiStart) / 1e6;
+        telemetry.recordAiTurn(false, aiDurationMs);
+        telemetry.recordHandoff('assistant_service_unavailable');
         console.error('[relay] assistant failure:', error);
         await store.addMessage({
           conversationId,
@@ -649,6 +736,7 @@ app.post(
           `[relay] human changed the status of ${conversationId} during an assistant turn; keeping their decision`,
         );
       } else if (escalate) {
+        telemetry.recordHandoff(escalationReason ?? 'unresolved request');
         await store.addMessage({
           conversationId,
           role: 'system',
@@ -684,8 +772,8 @@ app.post(
   }),
 );
 
-app.post(
-  '/api/conversations/:id/escalate',
+apiRouter.post(
+  '/conversations/:id/escalate',
   writeLimiter,
   requireConversationAccess,
   wrap(async (req, res) => {
@@ -704,6 +792,7 @@ app.post(
     }
 
     const finalReason = reason && reason.length > 0 ? reason : 'Customer requested a human agent';
+    telemetry.recordHandoff(finalReason);
 
     await store.addMessage({
       conversationId,
@@ -723,8 +812,8 @@ app.post(
   }),
 );
 
-app.post(
-  '/api/conversations/:id/rating',
+apiRouter.post(
+  '/conversations/:id/rating',
   writeLimiter,
   requireConversationAccess,
   wrap(async (req, res) => {
@@ -753,11 +842,57 @@ app.post(
   }),
 );
 
+apiRouter.post(
+  '/conversations/:id/messages/:messageId/feedback',
+  writeLimiter,
+  requireConversationAccess,
+  wrap(async (req, res) => {
+    const { id: conversationId, messageId } = req.params;
+    const body = asRecord(req.body);
+    const helpful = Boolean(body.helpful);
+    const validReasons = ['incorrect', 'didnt_answer', 'missing_info', 'need_human'];
+    const reason = typeof body.reason === 'string' && validReasons.includes(body.reason)
+      ? (body.reason as 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human')
+      : null;
+    const comment = readOptionalString(body.comment, 500) ?? null;
+
+    const updatedMessage = await store.recordMessageFeedback(conversationId, messageId, {
+      helpful,
+      reason,
+      comment,
+    });
+
+    if (!updatedMessage) {
+      res.status(404).json({ error: 'Message not found' });
+      return;
+    }
+
+    if (!helpful && reason === 'need_human') {
+      telemetry.recordHandoff('Customer requested human support via message feedback');
+      const existing = await store.getConversation(conversationId);
+      if (existing && existing.status !== 'waiting') {
+        await store.addMessage({
+          conversationId,
+          role: 'system',
+          content: 'Escalated to human agent: Customer flagged answer as needing a human.',
+        });
+        const updatedConv = await store.updateConversation(conversationId, {
+          status: 'waiting',
+          escalationReason: 'Customer requested human support via message feedback',
+        });
+        emitConversation(conversationId, updatedConv?.status ?? null, updatedConv?.title ?? undefined);
+      }
+    }
+
+    res.json({ ok: true, message: updatedMessage });
+  }),
+);
+
 /* ------------------------------------------------------------------ *
  * Admin - conversations
  * ------------------------------------------------------------------ */
 
-app.get('/api/admin/conversations', apiLimiter, requireUser, wrap(async (req, res) => {
+apiRouter.get('/admin/conversations', apiLimiter, requireUser, wrap(async (req, res) => {
   // Pagination: newest first, bounded page size.
   const limitRaw = Number(req.query.limit);
   const offsetRaw = Number(req.query.offset);
@@ -772,8 +907,8 @@ app.get('/api/admin/conversations', apiLimiter, requireUser, wrap(async (req, re
   });
 }));
 
-app.get(
-  '/api/admin/conversations/:id',
+apiRouter.get(
+  '/admin/conversations/:id',
   apiLimiter,
   requireUser,
   wrap(async (req, res) => {
@@ -786,7 +921,7 @@ app.get(
   }),
 );
 
-app.get('/api/admin/stats', apiLimiter, requireUser, wrap(async (req, res) => {
+apiRouter.get('/admin/stats', apiLimiter, requireUser, wrap(async (req, res) => {
   const raw = req.query.days;
   let days = 7;
   if (raw !== undefined) {
@@ -801,8 +936,17 @@ app.get('/api/admin/stats', apiLimiter, requireUser, wrap(async (req, res) => {
   res.json({ ...(await store.getStats(days)), mode: MODE });
 }));
 
-app.post(
-  '/api/admin/conversations/:id/reply',
+/** Free-plan usage for the current calendar month (admin visibility). */
+apiRouter.get('/admin/usage', apiLimiter, requireUser, wrap(async (_req, res) => {
+  const { start } = currentMonthWindow();
+  res.json(await getUsageSummary({
+    conversations: () => store.countConversationsSince(start),
+    aiMessages: () => store.countAssistantMessagesSince(start),
+  }));
+}));
+
+apiRouter.post(
+  '/admin/conversations/:id/reply',
   writeLimiter,
   requireUser,
   wrap(async (req, res) => {
@@ -837,8 +981,8 @@ app.post(
   }),
 );
 
-app.post(
-  '/api/admin/conversations/:id/resolve',
+apiRouter.post(
+  '/admin/conversations/:id/resolve',
   writeLimiter,
   requireUser,
   wrap(async (req, res) => {
@@ -867,8 +1011,8 @@ app.post(
   }),
 );
 
-app.post(
-  '/api/admin/conversations/:id/assign',
+apiRouter.post(
+  '/admin/conversations/:id/assign',
   writeLimiter,
   requireUser,
   wrap(async (req, res) => {
@@ -897,7 +1041,7 @@ app.post(
  * Admin - FAQs
  * ------------------------------------------------------------------ */
 
-app.post('/api/admin/faqs', writeLimiter, requireAdminRole, wrap(async (req, res) => {
+apiRouter.post('/admin/faqs', writeLimiter, requireAdminRole, wrap(async (req, res) => {
   const body = asRecord(req.body);
 
   const title = readRequiredString(body.title, MAX_TITLE);
@@ -926,11 +1070,13 @@ app.post('/api/admin/faqs', writeLimiter, requireAdminRole, wrap(async (req, res
     return;
   }
 
-  res.status(201).json(await store.createFaq({ title, answer, category, tags }));
+  const created = await store.createFaq({ title, answer, category, tags });
+  clearFaqTermCache();
   publish({ type: 'faq' });
+  res.status(201).json(created);
 }));
 
-app.patch('/api/admin/faqs/:id', writeLimiter, requireAdminRole, wrap(async (req, res) => {
+apiRouter.patch('/admin/faqs/:id', writeLimiter, requireAdminRole, wrap(async (req, res) => {
   const faqId = req.params.id;
   if (!(await store.getFaq(faqId))) {
     res.status(404).json({ error: 'FAQ not found' });
@@ -993,15 +1139,48 @@ app.patch('/api/admin/faqs/:id', writeLimiter, requireAdminRole, wrap(async (req
     res.status(404).json({ error: 'FAQ not found' });
     return;
   }
-  res.json(updated);
+  clearFaqTermCache();
   publish({ type: 'faq' });
+  res.json(updated);
 }));
+
+apiRouter.get('/admin/knowledge-gaps', apiLimiter, requireUser, wrap(async (_req, res) => {
+  res.json({ items: await store.listKnowledgeGaps() });
+}));
+
+apiRouter.post('/admin/knowledge-gaps/:id/resolve', writeLimiter, requireUser, wrap(async (req, res) => {
+  const resolved = await store.resolveKnowledgeGap(req.params.id);
+  if (!resolved) {
+    res.status(404).json({ error: 'Knowledge gap not found' });
+    return;
+  }
+  res.json({ ok: true });
+}));
+
+apiRouter.post('/admin/onboarding/sample-knowledge', writeLimiter, requireAdminRole, wrap(async (_req, res) => {
+  const faqs = await store.seedSampleKnowledge();
+  clearFaqTermCache();
+  publish({ type: 'faq' });
+  res.json({ items: faqs });
+}));
+
+// Auth: attach user session before API routing
+app.use(auth.attachUser);
+
+// Versioned v1 API with standard envelope: { success, data | error }
+const v1 = express.Router();
+v1.use(envelope);
+v1.use(apiRouter);
+app.use('/api/v1', v1);
+
+// Legacy unversioned API without envelope
+app.use('/api', apiRouter);
 
 /* ------------------------------------------------------------------ *
  * API 404 + static frontend + SPA fallback
  * ------------------------------------------------------------------ */
 
-app.use('/api', apiLimiter, (_req: Request, res: Response) => {
+app.use(['/api', '/api/v1'], apiLimiter, (_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
 });
 
@@ -1011,6 +1190,15 @@ const INDEX_FILE = path.join(DIST_DIR, 'index.html');
 if (fs.existsSync(DIST_DIR)) {
   app.use(express.static(DIST_DIR, { index: false }));
 }
+
+// Browser navigation or direct access to system health
+app.get('/admin/system-health', (req: Request, res: Response, next: NextFunction) => {
+  if (req.accepts('json') && !req.accepts('html')) {
+    res.redirect('/api/admin/system-health');
+    return;
+  }
+  next();
+});
 
 app.get(/^\/(?!api(?:\/|$)).*/, (req: Request, res: Response, next: NextFunction) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {

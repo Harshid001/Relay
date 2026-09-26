@@ -140,6 +140,62 @@ export function generateDemoTurn(input: DemoTurnInput): AgentTurnResult {
     };
   }
 
+  if (handoff.escalate && (handoff.code === 'human_request' || handoff.code === 'billing_dispute')) {
+    return {
+      reply: handoffMessage(handoff.code),
+      intent: detection.intent,
+      escalate: true,
+      escalationReason: handoff.reason,
+      sources: [],
+      confidence: 'high',
+      provider: 'demo',
+      toolCall: null,
+    };
+  }
+
+  const demandsImmediateRefundOrWrongItem =
+    /\b(issue (?:the )?refund (?:now|immediately)|refund (?:me )?now|can you refund now|give (?:me )?a? ?refund now)\b/i.test(input.userText) ||
+    (/\b(wrong (?:product|item|order)|damaged (?:product|item)|different item)\b/i.test(input.userText) && /\brefund\b/i.test(input.userText));
+
+  if (demandsImmediateRefundOrWrongItem) {
+    return {
+      reply:
+        "I don't have enough verified information to safely resolve this or issue a refund directly. Would you like me to connect you with support?",
+      intent: 'refund',
+      escalate: false,
+      escalationReason: 'Insufficient information to safely resolve',
+      sources: [],
+      confidence: 'low',
+      provider: 'demo',
+      toolCall: null,
+    };
+  }
+
+  const looksLikeOrderPlusRefund =
+    /\b(order|package|delivery|parcel|shipment)\b/i.test(input.userText) &&
+    /\b(not arrived|hasn't arrived|has not arrived|never arrived|lost|late|missing|where)\b/i.test(input.userText) &&
+    /\b(refund|money back|return)\b/i.test(input.userText);
+
+  if (looksLikeOrderPlusRefund) {
+    const shippingFaq = input.faqs.find((f) => f.id === 'faq-failed-delivery' || f.id === 'faq-order-tracking');
+    const refundFaq = input.faqs.find((f) => f.id === 'faq-refund-timing' || f.id === 'faq-return-policy-30-days');
+    const sources: SourceRef[] = [];
+    if (shippingFaq) sources.push({ id: shippingFaq.id, title: shippingFaq.title });
+    if (refundFaq) sources.push({ id: refundFaq.id, title: refundFaq.title });
+
+    return {
+      reply:
+        "I can help with that. According to our delivery policy, if a parcel hasn't arrived or a delivery attempt failed, carriers often re-attempt on the next business day or our team can investigate with the courier. According to our refund policy, once a missing parcel or return is verified, refunds are released within 5 to 10 business days.",
+      intent: 'refund',
+      escalate: false,
+      escalationReason: null,
+      sources,
+      confidence: 'high',
+      provider: 'demo',
+      toolCall: null,
+    };
+  }
+
   if (handoff.escalate && handoff.code) {
     return {
       reply: handoffMessage(handoff.code),
@@ -180,10 +236,11 @@ export function generateDemoTurn(input: DemoTurnInput): AgentTurnResult {
   }
 
   return {
-    reply: clarifyingQuestion(resolvedIntent),
+    reply:
+      "I don't have enough verified information in our knowledge base to safely resolve this. Would you like me to connect you with support?",
     intent: resolvedIntent,
     escalate: false,
-    escalationReason: null,
+    escalationReason: 'Insufficient information to safely resolve',
     sources: [],
     confidence: 'low',
     provider: 'demo',

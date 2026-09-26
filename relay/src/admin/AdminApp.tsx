@@ -6,22 +6,318 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent, ReactNode } from 'react';
 import {
-  AlertCircle, ArrowRight, BarChart3, BookOpen, Bot, Check, CheckCircle2, Clock, Inbox, LayoutDashboard,
-  LifeBuoy, Loader2, MessageSquare, MessagesSquare, Pencil, Plus, RefreshCw, Search, Send,
-  Sparkles, Settings as SettingsIcon, ShieldCheck, Star, UserRound, Users, X,
+  AlertCircle, ArrowRight, BarChart3, BookOpen, Bot, Check, CheckCircle2, Clock, Code, Copy,
+  ExternalLink, FileText, HelpCircle, Inbox, LayoutDashboard, LifeBuoy, Loader2, MessageSquare,
+  MessagesSquare, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Settings as SettingsIcon,
+  ShieldCheck, Star, ThumbsDown, UserRound, Users, X,
 } from 'lucide-react';
 
 import { ApiError, AuthError, api, getAdminToken, setAdminToken } from '../service-api';
 import type { SessionUser } from '../service-api';
-import type { Conversation, ConversationDetail, ConversationStatus, Faq, FaqInput, Health, Intent, Stats } from '../service-types';
+import type {
+  Conversation, ConversationDetail, ConversationStatus, Faq, FaqInput, Health, Intent,
+  KnowledgeGap, Stats, SystemHealthReport, Usage,
+} from '../service-types';
 import { AccountCard } from '../Auth';
 import {
-  ADMIN_NAME, Avatar, CitedAnswer, EmptyState, INTENTS, INTENT_LABEL, IntentBars, IntentPill,
+  ADMIN_NAME, Avatar, BusinessStoryCard, CitedAnswer, EmptyState, INTENTS, INTENT_LABEL, IntentBars, IntentPill,
   lastCustomerQueryRef, LogoMark, Modal, PROVIDER_LABEL, Spinner, STATUS_LABEL, StatCard, statCards,
   StatusPill, VolumeChart, MessageBubble, currentGreeting, errorMessage, initials,
   formatDateTime, formatSeconds, smoothPath, timeAgo, todayLabel,
 } from '../ui/shared';
 
+/* ================================================================== *
+ * Widget installation modal
+ * ================================================================== */
+
+export function InstallWidgetModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [tab, setTab] = useState<'script' | 'shopify' | 'react'>('script');
+  const [copied, setCopied] = useState(false);
+
+  if (!isOpen) return null;
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://relay.yourdomain.com';
+
+  const scriptCode = `<!-- Relay AI Support Widget -->
+<script
+  src="${origin}/widget.js"
+  data-workspace="acme-studio"
+  async
+></script>`;
+
+  const shopifyCode = `<!-- In your Shopify theme.liquid, right before </body>: -->
+<script
+  src="${origin}/widget.js"
+  data-workspace="acme-studio"
+  async
+></script>`;
+
+  const reactCode = `// In your React / Next.js root layout:
+export function SupportWidget() {
+  return (
+    <script
+      src="${origin}/widget.js"
+      data-workspace="acme-studio"
+      async
+    />
+  );
+}`;
+
+  const currentCode = tab === 'script' ? scriptCode : tab === 'shopify' ? shopifyCode : reactCode;
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(currentCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Modal
+      title="Connect your support widget"
+      description="Add Relay to your storefront or web app in under two minutes."
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          <button className="btn btn-primary" onClick={copyCode}>
+            {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+            {copied ? 'Copied to clipboard' : 'Copy code snippet'}
+          </button>
+        </>
+      }
+    >
+      <div className="modal-body">
+        <div className="segmented" style={{ marginBottom: 16 }}>
+          <button
+            type="button"
+            className={tab === 'script' ? 'active' : ''}
+            onClick={() => setTab('script')}
+          >
+            HTML / Vanilla JS
+          </button>
+          <button
+            type="button"
+            className={tab === 'shopify' ? 'active' : ''}
+            onClick={() => setTab('shopify')}
+          >
+            Shopify / WooCommerce
+          </button>
+          <button
+            type="button"
+            className={tab === 'react' ? 'active' : ''}
+            onClick={() => setTab('react')}
+          >
+            React / Next.js
+          </button>
+        </div>
+
+        <div className="code-block-wrap" style={{ position: 'relative' }}>
+          <pre
+            className="code-box"
+            style={{
+              padding: 14,
+              background: '#1c2420',
+              color: '#f3f6f3',
+              borderRadius: 8,
+              fontSize: 13,
+              overflowX: 'auto',
+              margin: 0,
+              fontFamily: 'monospace',
+            }}
+          >
+            <code>{currentCode}</code>
+          </pre>
+        </div>
+
+        <div className="card" style={{ marginTop: 16, padding: 14, background: 'var(--surface-sunken)' }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>How it works on your site:</div>
+          <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 12.5, color: 'var(--ink-muted)', lineHeight: 1.6 }}>
+            <li>Non-intrusive floating launcher button in the bottom right corner.</li>
+            <li>Grounded solely in your knowledge base articles — zero hallucinations.</li>
+            <li>When confidence is low or the customer requests a person, it automatically escalates to this inbox.</li>
+          </ul>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ================================================================== *
+ * Onboarding Card (First 5 Minutes)
+ * ================================================================== */
+
+interface OnboardingCardProps {
+  faqCount: number;
+  onSeedSample: () => void;
+  seedingSample: boolean;
+  onOpenKb: () => void;
+  onPreview: () => void;
+  onInstallWidget: () => void;
+  onViewInbox: () => void;
+}
+
+function OnboardingCard({
+  faqCount, onSeedSample, seedingSample, onOpenKb, onPreview, onInstallWidget, onViewInbox,
+}: OnboardingCardProps) {
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return localStorage.getItem('relay_onboarding_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const dismiss = () => {
+    try {
+      localStorage.setItem('relay_onboarding_dismissed', 'true');
+    } catch {}
+    setDismissed(true);
+  };
+
+  const reopen = () => {
+    try {
+      localStorage.removeItem('relay_onboarding_dismissed');
+    } catch {}
+    setDismissed(false);
+  };
+
+  if (dismissed) {
+    return (
+      <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 16 }}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs"
+          onClick={reopen}
+          style={{ gap: 5, color: 'var(--ink-muted)' }}
+        >
+          <HelpCircle size={13} aria-hidden="true" />
+          Show "First 5 minutes" onboarding checklist
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <section className="onboarding-card" aria-label="First 5 minutes onboarding checklist">
+      <div className="onboarding-head">
+        <div>
+          <div className="onboarding-title">Welcome to Relay · First 5 minutes setup</div>
+          <div className="onboarding-sub">
+            Follow this 4-step loop to turn your customer support from chaotic to trustworthy.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs"
+          onClick={dismiss}
+          aria-label="Dismiss onboarding checklist"
+        >
+          <X size={14} aria-hidden="true" />
+          <span>Dismiss</span>
+        </button>
+      </div>
+
+      <div className="onboarding-steps">
+        <div className="onboarding-step">
+          <div className="step-num">1</div>
+          <div className="step-body">
+            <div className="step-title">
+              Add your knowledge
+              {faqCount > 0 ? (
+                <span className="badge badge-ok" style={{ marginLeft: 8 }}>
+                  <Check size={11} aria-hidden="true" /> {faqCount} active
+                </span>
+              ) : null}
+            </div>
+            <div className="step-sub">
+              Upload policies or load standard Acme Store defaults (Shipping, Returns, Refunds, Tracking, Account, Support).
+            </div>
+            <div className="step-actions">
+              <button
+                type="button"
+                className="btn btn-primary btn-xs"
+                onClick={onSeedSample}
+                disabled={seedingSample}
+              >
+                {seedingSample ? <Spinner size={12} /> : <Sparkles size={12} aria-hidden="true" />}
+                Use sample policies
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-xs"
+                onClick={onOpenKb}
+              >
+                <Plus size={12} aria-hidden="true" />
+                Add custom FAQ
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="onboarding-step">
+          <div className="step-num">2</div>
+          <div className="step-body">
+            <div className="step-title">Test your AI</div>
+            <div className="step-sub">
+              Ask multi-policy questions, verify cited sources, and trigger a handoff when confidence is low.
+            </div>
+            <div className="step-actions">
+              <button
+                type="button"
+                className="btn btn-outline btn-xs"
+                onClick={onPreview}
+              >
+                <MessageSquare size={12} aria-hidden="true" />
+                Open customer chat
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="onboarding-step">
+          <div className="step-num">3</div>
+          <div className="step-body">
+            <div className="step-title">Connect your support</div>
+            <div className="step-sub">
+              Install the lightweight chat launcher on your storefront or web app with a single tag.
+            </div>
+            <div className="step-actions">
+              <button
+                type="button"
+                className="btn btn-outline btn-xs"
+                onClick={onInstallWidget}
+              >
+                <Code size={12} aria-hidden="true" />
+                Install widget
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="onboarding-step">
+          <div className="step-num">4</div>
+          <div className="step-body">
+            <div className="step-title">You're live</div>
+            <div className="step-sub">
+              Confident answers are handled automatically. Every escalation flows directly to your human inbox.
+            </div>
+            <div className="step-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={onViewInbox}
+              >
+                <Inbox size={12} aria-hidden="true" />
+                View live inbox
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 interface OverviewProps {
   stats: Stats | null;
@@ -35,12 +331,16 @@ interface OverviewProps {
   onOpenKb: () => void;
   onPreview: () => void;
   onNewConversation: () => void;
+  onInstallWidget: () => void;
+  onSeedSample: () => void;
+  seedingSample: boolean;
+  faqCount: number;
   mode: 'demo' | 'live';
 }
 
 function OverviewPage({
   stats, statsLoading, conversations, loading, days, onDays, onOpen, onViewAll, onOpenKb,
-  onPreview, onNewConversation, mode,
+  onPreview, onNewConversation, onInstallWidget, onSeedSample, seedingSample, faqCount, mode,
 }: OverviewProps) {
   const [query, setQuery] = useState('');
 
@@ -86,6 +386,9 @@ function OverviewPage({
               </button>
             ))}
           </div>
+          <button className="btn btn-outline" onClick={onInstallWidget}>
+            <Code size={15} aria-hidden="true" />Install widget
+          </button>
           <button className="btn btn-outline" onClick={onPreview}>
             <MessageSquare size={15} aria-hidden="true" />Preview chat
           </button>
@@ -94,6 +397,18 @@ function OverviewPage({
           </button>
         </div>
       </header>
+
+      <OnboardingCard
+        faqCount={faqCount}
+        onSeedSample={onSeedSample}
+        seedingSample={seedingSample}
+        onOpenKb={onOpenKb}
+        onPreview={onPreview}
+        onInstallWidget={onInstallWidget}
+        onViewInbox={onViewAll}
+      />
+
+      <BusinessStoryCard stats={stats} days={days} />
 
       <div className="grid-stats">
         {statCards(stats, days).map(({ key, ...card }) => (
@@ -493,6 +808,18 @@ function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onErro
 
   const messages = detail?.messages ?? [];
 
+  const usedSources = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const msg of messages) {
+      if (msg.sources && msg.sources.length > 0) {
+        for (const src of msg.sources) {
+          map.set(src.id, src.title);
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
+  }, [messages]);
+
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -579,6 +906,22 @@ function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onErro
             <EmptyState title="Conversation unavailable" text="It may have been removed. Close this panel and try again." />
           ) : (
             <>
+              {conversation.status === 'waiting' || conversation.escalationReason ? (
+                <div className="escalation-alert-banner">
+                  <div className="escalation-alert-icon">
+                    <AlertCircle size={18} aria-hidden="true" />
+                  </div>
+                  <div className="escalation-alert-content">
+                    <div className="escalation-alert-title">
+                      {conversation.status === 'waiting' ? 'Needs Human Support' : 'Escalation Record'}
+                    </div>
+                    <div className="escalation-alert-reason">
+                      <strong>Reason for escalation:</strong> {conversation.escalationReason || 'Customer requested human support'}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="card" style={{ padding: 16, marginBottom: 18 }}>
                 <dl className="kv">
                   <dt>Assignee</dt>
@@ -587,8 +930,32 @@ function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onErro
                   <dd>{formatDateTime(conversation.createdAt)}</dd>
                   <dt>Last update</dt>
                   <dd>{formatDateTime(conversation.updatedAt)}</dd>
-                  <dt>Escalation</dt>
-                  <dd>{conversation.escalationReason ?? 'Not escalated'}</dd>
+                  <dt>Intent</dt>
+                  <dd><IntentPill intent={conversation.intent} /></dd>
+                  <dt>Reason for escalation</dt>
+                  <dd>{conversation.escalationReason ?? 'None (direct AI resolution)'}</dd>
+                  <dt>Knowledge used</dt>
+                  <dd>
+                    {usedSources.length === 0 ? (
+                      <span className="cell-muted">None used (unverified question or direct escalation)</span>
+                    ) : (
+                      <div className="row row-wrap" style={{ gap: 6 }}>
+                        {usedSources.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="btn btn-outline btn-xs"
+                            style={{ gap: 4 }}
+                            onClick={() => onOpenSource(s)}
+                            title="Inspect cited policy"
+                          >
+                            <BookOpen size={11} aria-hidden="true" />
+                            <span>{s.title}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </dd>
                   <dt>Answer source</dt>
                   <dd>{mode === 'live' ? 'CodeBuddy agent, grounded in the knowledge base' : 'Demo agent, grounded in the knowledge base'}</dd>
                 </dl>
@@ -679,16 +1046,44 @@ interface KnowledgeProps {
   faqs: Faq[];
   loading: boolean;
   onSaved: (faq: Faq) => void;
+  onSeedSample: () => void;
+  seedingSample: boolean;
   onError: (error: unknown) => void;
 }
 
 const EMPTY_FAQ: FaqInput = { title: '', answer: '', category: 'general', tags: [] };
 
-function KnowledgePage({ faqs, loading, onSaved, onError }: KnowledgeProps) {
+const GAP_REASON_LABEL: Record<string, string> = {
+  incorrect: 'Incorrect answer',
+  didnt_answer: "Didn't answer question",
+  missing_info: 'Missing information in KB',
+  need_human: 'Customer needed human',
+};
+
+function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, onError }: KnowledgeProps) {
+  const [activeSubTab, setActiveSubTab] = useState<'articles' | 'gaps'>('articles');
+  const [gaps, setGaps] = useState<KnowledgeGap[]>([]);
+  const [loadingGaps, setLoadingGaps] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<'all' | Intent>('all');
-  const [editing, setEditing] = useState<{ id: string | null; draft: FaqInput; tagsText: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string | null; gapId?: string; draft: FaqInput; tagsText: string } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const refreshGaps = useCallback(async () => {
+    setLoadingGaps(true);
+    try {
+      const res = await api.listKnowledgeGaps();
+      setGaps(res.items);
+    } catch (error) {
+      onError(error);
+    } finally {
+      setLoadingGaps(false);
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    void refreshGaps();
+  }, [refreshGaps]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -719,6 +1114,10 @@ function KnowledgePage({ faqs, loading, onSaved, onError }: KnowledgeProps) {
         ? await api.updateFaq(editing.id, payload)
         : await api.createFaq(payload);
       onSaved(saved);
+      if (editing.gapId) {
+        await api.resolveKnowledgeGap(editing.gapId);
+        setGaps((prev) => prev.filter((g) => g.id !== editing.gapId));
+      }
       setEditing(null);
     } catch (error) {
       onError(error);
@@ -738,12 +1137,22 @@ function KnowledgePage({ faqs, loading, onSaved, onError }: KnowledgeProps) {
           </div>
           <h1 className="page-title">Knowledge base</h1>
           <p className="page-sub">
-            Every answer Relay gives is grounded in these {faqs.length} articles. Keep them accurate and the
+            Every answer Relay gives is grounded in approved policies. Keep them accurate and the
             assistant stays accurate.
           </p>
         </div>
         <div className="head-actions">
           <button
+            type="button"
+            className="btn btn-outline"
+            onClick={onSeedSample}
+            disabled={seedingSample}
+          >
+            {seedingSample ? <Spinner size={14} /> : <Sparkles size={14} aria-hidden="true" />}
+            Use sample policies
+          </button>
+          <button
+            type="button"
             className="btn btn-primary"
             onClick={() => setEditing({ id: null, draft: { ...EMPTY_FAQ }, tagsText: '' })}
           >
@@ -752,75 +1161,193 @@ function KnowledgePage({ faqs, loading, onSaved, onError }: KnowledgeProps) {
         </div>
       </header>
 
-      <section className="card">
-        <div className="toolbar">
-          <div className="search">
-            <Search size={15} aria-hidden="true" />
-            <input
-              className="input"
-              type="search"
-              value={query}
-              placeholder="Search articles, answers and tags"
-              aria-label="Search knowledge base"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <div className="field" style={{ minWidth: 190 }}>
-            <select
-              className="select"
-              value={category}
-              aria-label="Filter by category"
-              onChange={(event) => setCategory(event.target.value as 'all' | Intent)}
-            >
-              <option value="all">All categories</option>
-              {INTENTS.map((value) => (
-                <option key={value} value={value}>{INTENT_LABEL[value]}</option>
-              ))}
-            </select>
-          </div>
-          <span className="note" style={{ marginLeft: 'auto' }}>
-            {filtered.length} of {faqs.length}
-          </span>
-        </div>
+      <div className="tabs" role="tablist" style={{ marginBottom: 16 }}>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === 'articles'}
+          className={`tab${activeSubTab === 'articles' ? ' active' : ''}`}
+          onClick={() => setActiveSubTab('articles')}
+        >
+          Articles
+          <span className="tab-count">{faqs.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubTab === 'gaps'}
+          className={`tab${activeSubTab === 'gaps' ? ' active' : ''}`}
+          onClick={() => {
+            setActiveSubTab('gaps');
+            void refreshGaps();
+          }}
+        >
+          Knowledge Gaps
+          <span className={`tab-count${gaps.length > 0 ? ' pulse' : ''}`}>{gaps.length}</span>
+        </button>
+      </div>
 
-        {loading && faqs.length === 0 ? (
-          <div className="loading-block"><Spinner />Loading articles…</div>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            title={query || category !== 'all' ? 'No articles match' : 'No articles yet'}
-            text={query || category !== 'all'
-              ? 'Try another search term or category.'
-              : 'Add your first article so Relay has something to answer from.'}
-          />
-        ) : (
-          filtered.map((faq) => (
-            <article className="faq-item" key={faq.id}>
-              <div className="faq-head">
-                <div style={{ minWidth: 0 }}>
-                  <div className="faq-title">{faq.title}</div>
-                  <div className="row row-wrap" style={{ marginTop: 6 }}>
-                    <IntentPill intent={faq.category} />
-                    <span className="note">Updated {formatDateTime(faq.updatedAt)}</span>
-                  </div>
-                </div>
-                <button
-                  className="btn btn-outline btn-sm"
-                  aria-label={`Edit article: ${faq.title}`}
-                  onClick={() => setEditing({ id: faq.id, draft: { ...faq }, tagsText: faq.tags.join(', ') })}
-                >
-                  <Pencil size={13} aria-hidden="true" />Edit
-                </button>
+      {activeSubTab === 'gaps' ? (
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">Identified Knowledge Gaps ({gaps.length})</div>
+              <div className="card-sub">
+                Questions customers flagged as unhelpful, missing information, or requiring escalation.
               </div>
-              <p className="faq-answer">{faq.answer}</p>
-              {faq.tags.length > 0 ? (
-                <div className="tag-row">
-                  {faq.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+            </div>
+            <button className="btn btn-ghost btn-xs" onClick={() => void refreshGaps()}>
+              <RefreshCw size={13} aria-hidden="true" />
+              Refresh
+            </button>
+          </div>
+
+          {loadingGaps && gaps.length === 0 ? (
+            <div className="loading-block"><Spinner />Loading knowledge gaps…</div>
+          ) : gaps.length === 0 ? (
+            <EmptyState
+              title="No open knowledge gaps"
+              text="When customers click 👎 or report missing policies in chat, Relay records them here so you can plug the gap."
+            />
+          ) : (
+            <div className="stack" style={{ padding: 18, gap: 14 }}>
+              {gaps.map((gap) => (
+                <article className="gap-card" key={gap.id}>
+                  <div className="gap-head">
+                    <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                      <span className="badge badge-warn">
+                        <AlertCircle size={12} aria-hidden="true" />
+                        {GAP_REASON_LABEL[gap.reason] || gap.reason}
+                      </span>
+                      <span className="note">{timeAgo(gap.createdAt)}</span>
+                    </div>
+                    <div className="gap-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-xs"
+                        onClick={() => {
+                          setEditing({
+                            id: null,
+                            gapId: gap.id,
+                            draft: {
+                              title: gap.query,
+                              answer: '',
+                              category: 'general',
+                              tags: ['gap-fix'],
+                            },
+                            tagsText: 'gap-fix',
+                          });
+                        }}
+                      >
+                        <Plus size={12} aria-hidden="true" />
+                        Draft article from gap
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-xs"
+                        onClick={async () => {
+                          try {
+                            await api.resolveKnowledgeGap(gap.id);
+                            setGaps((prev) => prev.filter((g) => g.id !== gap.id));
+                          } catch (e) {
+                            onError(e);
+                          }
+                        }}
+                      >
+                        <Check size={12} aria-hidden="true" />
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                  <div className="gap-query">
+                    <strong>Customer question:</strong> "{gap.query}"
+                  </div>
+                  {gap.answer ? (
+                    <div className="gap-answer-snippet">
+                      <strong>Relay reply:</strong> {gap.answer.slice(0, 160)}…
+                    </div>
+                  ) : null}
+                  {gap.comment ? (
+                    <div className="gap-comment">
+                      <strong>Customer feedback:</strong> "{gap.comment}"
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : (
+        <section className="card">
+          <div className="toolbar">
+            <div className="search">
+              <Search size={15} aria-hidden="true" />
+              <input
+                className="input"
+                type="search"
+                value={query}
+                placeholder="Search articles, answers and tags"
+                aria-label="Search knowledge base"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+            <div className="field" style={{ minWidth: 190 }}>
+              <select
+                className="select"
+                value={category}
+                aria-label="Filter by category"
+                onChange={(event) => setCategory(event.target.value as 'all' | Intent)}
+              >
+                <option value="all">All categories</option>
+                {INTENTS.map((value) => (
+                  <option key={value} value={value}>{INTENT_LABEL[value]}</option>
+                ))}
+              </select>
+            </div>
+            <span className="note" style={{ marginLeft: 'auto' }}>
+              {filtered.length} of {faqs.length}
+            </span>
+          </div>
+
+          {loading && faqs.length === 0 ? (
+            <div className="loading-block"><Spinner />Loading articles…</div>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              title={query || category !== 'all' ? 'No articles match' : 'No articles yet'}
+              text={query || category !== 'all'
+                ? 'Try another search term or category.'
+                : 'Add your first article so Relay has something to answer from.'}
+            />
+          ) : (
+            filtered.map((faq) => (
+              <article className="faq-item" key={faq.id}>
+                <div className="faq-head">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="faq-title">{faq.title}</div>
+                    <div className="row row-wrap" style={{ marginTop: 6 }}>
+                      <IntentPill intent={faq.category} />
+                      <span className="note">Updated {formatDateTime(faq.updatedAt)}</span>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    aria-label={`Edit article: ${faq.title}`}
+                    onClick={() => setEditing({ id: faq.id, draft: { ...faq }, tagsText: faq.tags.join(', ') })}
+                  >
+                    <Pencil size={13} aria-hidden="true" />Edit
+                  </button>
                 </div>
-              ) : null}
-            </article>
-          ))
-        )}
-      </section>
+                <p className="faq-answer">{faq.answer}</p>
+                {faq.tags.length > 0 ? (
+                  <div className="tag-row">
+                    {faq.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                  </div>
+                ) : null}
+              </article>
+            ))
+          )}
+        </section>
+      )}
 
       {editing ? (
         <Modal
@@ -946,6 +1473,8 @@ function AnalyticsPage({
         </div>
       </header>
 
+      <BusinessStoryCard stats={stats} days={days} />
+
       <div className="grid-stats">
         {cards.map(({ key, ...card }) => <StatCard key={key} {...card} />)}
       </div>
@@ -1037,6 +1566,147 @@ function AnalyticsPage({
           <IntentBars stats={stats} />
         </section>
       </div>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">Support Resolution & Quality Funnel</div>
+            <div className="card-sub">
+              How customer inquiries progress from first touch to verified resolution in the last {days} days.
+            </div>
+          </div>
+          <span className="badge badge-ok">
+            <ShieldCheck size={12} aria-hidden="true" />
+            Zero-Guess Support
+          </span>
+        </div>
+
+        <div className="funnel-grid">
+          <div className="funnel-step">
+            <div className="funnel-step-num">Step 1</div>
+            <div className="funnel-step-name">Total Inquiries</div>
+            <div className="funnel-step-val">{stats ? stats.total : 0}</div>
+            <div className="funnel-step-sub">100% of customer threads</div>
+          </div>
+
+          <div className="funnel-step">
+            <div className="funnel-step-num">Step 2</div>
+            <div className="funnel-step-name">AI Grounded Answers</div>
+            <div className="funnel-step-val">
+              {stats ? (stats.aiResolutions + stats.humanHandoffs) : 0}
+            </div>
+            <div className="funnel-step-sub">Checked against verified KB</div>
+          </div>
+
+          <div className="funnel-step highlight">
+            <div className="funnel-step-num">Step 3</div>
+            <div className="funnel-step-name">AI Zero-Touch Resolutions</div>
+            <div className="funnel-step-val">{stats ? stats.aiResolutions : 0}</div>
+            <div className="funnel-step-sub">
+              {stats && stats.total > 0 ? `${stats.resolutionRate}% resolution rate` : 'Resolved by AI'}
+            </div>
+          </div>
+
+          <div className="funnel-step">
+            <div className="funnel-step-num">Step 4</div>
+            <div className="funnel-step-name">Human Escalations</div>
+            <div className="funnel-step-val">{stats ? stats.humanHandoffs : 0}</div>
+            <div className="funnel-step-sub">Handed off with full context</div>
+          </div>
+
+          <div className="funnel-step">
+            <div className="funnel-step-num">Step 5</div>
+            <div className="funnel-step-name">CSAT Validations</div>
+            <div className="funnel-step-val">{stats ? stats.ratingCount : 0}</div>
+            <div className="funnel-step-sub">
+              {stats && stats.csat !== null ? `${stats.csat}% positive score` : 'Customer verified'}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <div>
+            <div className="card-title">Customer Experience & Product Funnel Health</div>
+            <div className="card-sub">Tracking every milestone from visitor to verified CSAT.</div>
+          </div>
+        </div>
+        <div className="table-scroll">
+          <table className="data">
+            <thead>
+              <tr>
+                <th scope="col">Funnel Milestone</th>
+                <th scope="col">Status</th>
+                <th scope="col">Target Experience</th>
+                <th scope="col">Measurement Metric</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>1. Landing page visit</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Positioning: "Answer when confident, escalate when necessary"</td>
+                <td className="cell-muted">Traffic & interest</td>
+              </tr>
+              <tr>
+                <td><strong>2. Start free / Signup</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Frictionless entry without mandatory credit card</td>
+                <td className="cell-muted">Account creation rate</td>
+              </tr>
+              <tr>
+                <td><strong>3. Workspace created</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Immediate ready-to-test workspace</td>
+                <td className="cell-muted">Workspace readiness</td>
+              </tr>
+              <tr>
+                <td><strong>4. Knowledge added</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Upload FAQ / Paste text / 1-click Acme demo policies</td>
+                <td className="cell-muted">Verified articles</td>
+              </tr>
+              <tr>
+                <td><strong>5. First AI question</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Customer asks support question in preview or widget</td>
+                <td className="cell-muted">First message latency</td>
+              </tr>
+              <tr>
+                <td><strong>6. First cited answer</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Trustworthy answer citing verified knowledge articles</td>
+                <td className="cell-muted">Citation accuracy (100%)</td>
+              </tr>
+              <tr>
+                <td><strong>7. Safe human handoff</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Low confidence or out-of-scope triggers handoff without guessing</td>
+                <td className="cell-muted">{stats ? `${stats.humanHandoffs} handoffs` : '0'}</td>
+              </tr>
+              <tr>
+                <td><strong>8. Agent inbox takeover</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Agent sees intent, full transcript, knowledge used, escalation reason</td>
+                <td className="cell-muted">Realtime SSE queue</td>
+              </tr>
+              <tr>
+                <td><strong>9. Conversation resolved</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Agent or AI resolves thread cleanly</td>
+                <td className="cell-muted">{stats ? `${stats.resolved} resolved` : '0'}</td>
+              </tr>
+              <tr>
+                <td><strong>10. Customer CSAT rating</strong></td>
+                <td><span className="badge badge-ok">Active</span></td>
+                <td>Customer rates 1-5 stars & message feedback thumbs</td>
+                <td className="cell-muted">{stats && stats.csat !== null ? `${stats.csat}% CSAT` : 'Pending'}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   );
 }
@@ -1053,6 +1723,61 @@ function SettingsPage({
   onRefreshHealth: () => void;
 }) {
   const mode = health?.mode ?? 'demo';
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [sysReport, setSysReport] = useState<SystemHealthReport | null>(null);
+  const [sysLoading, setSysLoading] = useState(true);
+  const [sysError, setSysError] = useState<string | null>(null);
+
+  const fetchSysHealth = useCallback(() => {
+    setSysLoading(true);
+    setSysError(null);
+    api.getSystemHealth()
+      .then((report) => {
+        setSysReport(report);
+        setSysLoading(false);
+      })
+      .catch((err) => {
+        setSysError(errorMessage(err));
+        setSysLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getUsage()
+      .then((summary) => { if (!cancelled) setUsage(summary); })
+      .catch((error) => { if (!cancelled) setUsageError(errorMessage(error)); });
+    fetchSysHealth();
+    return () => { cancelled = true; };
+  }, [fetchSysHealth]);
+
+  const handleRefresh = useCallback(() => {
+    onRefreshHealth();
+    fetchSysHealth();
+  }, [onRefreshHealth, fetchSysHealth]);
+
+  const meterRow = (label: string, used: number, limit: number | null) => {
+    const percent = limit && limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <div className="bar-head">
+          <span className="bar-name">{label}</span>
+          <span className="bar-val">{used.toLocaleString()} / {limit === null ? '∞' : limit.toLocaleString()} · {percent}%</span>
+        </div>
+        <div
+          className="bar-track"
+          role="progressbar"
+          aria-label={label}
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div className="bar-fill" style={{ width: `${percent}%` }} />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -1067,13 +1792,158 @@ function SettingsPage({
           <p className="page-sub">How this Relay workspace is configured, and what it can and cannot do.</p>
         </div>
         <div className="head-actions">
-          <button className="btn btn-outline" onClick={onRefreshHealth}>
+          <button className="btn btn-outline" onClick={handleRefresh}>
             <RefreshCw size={15} aria-hidden="true" />Refresh status
           </button>
         </div>
       </header>
 
       <div className="stack">
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">System Health & Telemetry</div>
+              <div className="card-sub">Real-time status of production subsystems (<span className="code">GET /api/admin/system-health</span>).</div>
+            </div>
+            <span className={`badge ${sysReport?.status === 'healthy' ? 'badge-ok' : sysReport?.status === 'degraded' ? 'badge-warn' : 'badge-danger'}`}>
+              ● {sysReport?.status === 'healthy' ? 'All Systems Healthy' : sysReport?.status ?? 'Checking...'}
+            </span>
+          </div>
+          <div className="card-pad">
+            {sysLoading ? (
+              <div className="loading-block"><Spinner />Checking system health…</div>
+            ) : sysError ? (
+              <p className="note" style={{ color: 'var(--danger)' }}>{sysError}</p>
+            ) : sysReport ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
+                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>API Gateway</span>
+                      <span className={`badge ${sysReport.components.api.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                        ● {sysReport.components.api.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
+                      {sysReport.telemetry.http.avgDurationMs !== null ? `${sysReport.telemetry.http.avgDurationMs}ms avg latency` : 'Active'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {sysReport.telemetry.http.requestsTotal} reqs · {sysReport.telemetry.http.responses2xx} 2xx · {sysReport.telemetry.http.responses4xx} 4xx · {sysReport.telemetry.http.responses5xx} 5xx
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>Database</span>
+                      <span className={`badge ${sysReport.components.database.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                        ● {sysReport.components.database.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
+                      {sysReport.telemetry.database.pingLatencyMs !== null ? `${sysReport.telemetry.database.pingLatencyMs}ms ping` : 'Connected'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {sysReport.telemetry.database.errorsTotal} connection errors
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>AI Provider</span>
+                      <span className={`badge ${sysReport.components.aiProvider.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                        ● {sysReport.components.aiProvider.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
+                      {sysReport.telemetry.ai.avgLatencyMs !== null ? `${sysReport.telemetry.ai.avgLatencyMs}ms avg latency` : 'Standby'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {sysReport.telemetry.ai.requestsTotal} turns · {sysReport.telemetry.ai.failuresTotal} failures
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>Realtime / SSE</span>
+                      <span className={`badge ${sysReport.components.realtimeSse.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                        ● {sysReport.components.realtimeSse.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
+                      {sysReport.telemetry.realtimeSse.activeSubscribers} active clients
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {sysReport.telemetry.realtimeSse.failuresTotal} disconnect errors
+                    </div>
+                  </div>
+
+                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>Knowledge Base</span>
+                      <span className={`badge ${sysReport.components.knowledgeBase.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                        ● {sysReport.components.knowledgeBase.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
+                      {sysReport.telemetry.knowledgeBase.faqCount} articles indexed
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {sysReport.telemetry.knowledgeBase.searchesTotal} searches · {sysReport.telemetry.knowledgeBase.zeroMatchSearches} zero matches
+                    </div>
+                  </div>
+                </div>
+
+                {sysReport.telemetry.planLimits || sysReport.telemetry.handoffs ? (
+                  <dl className="kv" style={{ marginTop: 8 }}>
+                    {sysReport.telemetry.planLimits && (
+                      <>
+                        <dt>Plan Rejections</dt>
+                        <dd>
+                          {sysReport.telemetry.planLimits.conversationsRejected} conversations · {sysReport.telemetry.planLimits.aiMessagesRejected} AI messages
+                        </dd>
+                      </>
+                    )}
+                    {sysReport.telemetry.handoffs && (
+                      <>
+                        <dt>Handoffs Recorded</dt>
+                        <dd>
+                          {sysReport.telemetry.handoffs.total} total
+                        </dd>
+                      </>
+                    )}
+                  </dl>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">Free plan — this month</div>
+              <div className="card-sub">Relay is free: conversations and AI answers reset every calendar month.</div>
+            </div>
+            <span className="badge badge-ok">Free</span>
+          </div>
+          <div className="card-pad">
+            {usageError ? (
+              <p className="note" style={{ color: 'var(--danger)' }}>{usageError}</p>
+            ) : usage ? (
+              <>
+                {meterRow('Conversations', usage.conversationsUsed, usage.conversationsLimit)}
+                {meterRow('AI answers', usage.aiMessagesUsed, usage.aiMessagesLimit)}
+                <p className="note" style={{ marginTop: 8 }}>
+                  Human replies, escalations and ratings are never metered. Self-hosting? Raise or remove the caps
+                  with <span className="code">FREE_CONVERSATIONS_LIMIT</span> and <span className="code">FREE_AI_MESSAGES_LIMIT</span> (0 = unlimited).
+                </p>
+              </>
+            ) : (
+              <div className="loading-block"><Spinner />Loading usage…</div>
+            )}
+          </div>
+        </section>
+
         <section className="card">
           <div className="card-head">
             <div>
@@ -1228,6 +2098,8 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
   const [authError, setAuthError] = useState<string | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
+  const [installWidgetOpen, setInstallWidgetOpen] = useState(false);
+  const [seedingSample, setSeedingSample] = useState(false);
   /** Conversations that just entered the human queue, with the time they did. */
   const [newWaiting, setNewWaiting] = useState<Map<string, number>>(new Map());
   const statusSnapshot = useRef<Map<string, string>>(new Map());
@@ -1241,6 +2113,22 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
     }
     setToast({ kind: 'error', text: errorMessage(error), retry });
   }, []);
+
+  const handleSeedSample = useCallback(async () => {
+    setSeedingSample(true);
+    try {
+      const res = await api.seedSampleKnowledge();
+      setFaqs(res.items);
+      setToast({
+        kind: 'info',
+        text: `Loaded ${res.items.length} sample policies (Returns, Shipping, Refunds, Tracking, Account, Support).`,
+      });
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setSeedingSample(false);
+    }
+  }, [handleError]);
 
   const reload = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1576,6 +2464,10 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
             onOpenKb={openKnowledge}
             onPreview={onPreviewChat}
             onNewConversation={onNewConversation}
+            onInstallWidget={() => setInstallWidgetOpen(true)}
+            onSeedSample={handleSeedSample}
+            seedingSample={seedingSample}
+            faqCount={faqs.length}
             mode={mode}
           />
         ) : null}
@@ -1591,7 +2483,14 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
         ) : null}
 
         {page === 'knowledge' ? (
-          <KnowledgePage faqs={faqs} loading={loading} onSaved={saveFaq} onError={handleError} />
+          <KnowledgePage
+            faqs={faqs}
+            loading={loading}
+            onSaved={saveFaq}
+            onSeedSample={handleSeedSample}
+            seedingSample={seedingSample}
+            onError={handleError}
+          />
         ) : null}
 
         {page === 'analytics' ? (
@@ -1602,6 +2501,11 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
           <SettingsPage health={health} healthError={healthError} onRefreshHealth={() => void refreshHealth()} />
         ) : null}
       </main>
+
+      <InstallWidgetModal
+        isOpen={installWidgetOpen}
+        onClose={() => setInstallWidgetOpen(false)}
+      />
 
       {openId ? (
         <ConversationDrawer

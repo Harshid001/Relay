@@ -24,17 +24,25 @@ interface DemoStarter {
   orderId?: string;
 }
 
-/** One-click demo questions, ordered to hit the best scenarios in sequence. */
+/** One-click demo questions, ordered to demonstrate Relay's core loop in 1-2-3 sequence. */
 const DEMO_STARTERS: DemoStarter[] = [
   {
-    label: 'Where is my order?',
+    label: '1. Order + refund',
+    text: "My order hasn't arrived and I want a refund.",
+    kind: 'other',
+  },
+  {
+    label: '2. Unanswerable test',
+    text: 'I received the wrong product. Can you issue the refund now?',
+    kind: 'other',
+  },
+  {
+    label: '3. Order lookup #4471',
     text: "Where's my order #4471? It was supposed to arrive today.",
     kind: 'order',
     orderId: '4471',
   },
-  { label: 'Refund policy', text: 'What is your refund policy?', kind: 'other' },
-  { label: 'I cannot log in', text: 'I cannot log in to my account', kind: 'other' },
-  { label: 'Talk to a human', text: 'I want to talk to a human agent', kind: 'other' },
+  { label: '4. Talk to a human', text: 'I want to talk to a human agent', kind: 'other' },
 ];
 
 function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void }) {
@@ -208,6 +216,8 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
     setError(null);
     setBusy('send');
     setInput('');
+    /** A new conversation may fail (free cap). Only create once per send. */
+    let createdThisSend = false;
     pendingOrderId.current = opts?.starter?.orderId ?? /(\d{3,6})/.exec(content)?.[1] ?? null;
     // Staged tool phase for typed questions too: an order number plus a status
     // word means the lookup tool is about to run.
@@ -221,7 +231,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
       if (!active || !token) {
         const created = await customerApi.create({});
         active = created.conversation;
-        token = created.accessToken;
+        token = created.accessToken; // may be null when the free cap blocks creation
         commit({
           activeId: active.id,
           sessions: [
@@ -232,6 +242,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
         setConversation(active);
         setMessages([]);
         prevStatusRef.current = undefined;
+        createdThisSend = true;
       }
 
       const optimistic: Message = {
@@ -267,6 +278,13 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
     } catch (caught) {
       setMessages((prev) => prev.filter((message) => !message.id.startsWith('pending-')));
       setInput(content);
+      // A 429 from the free-plan cap: reset to the pre-send state so a retry
+      // can go through (or reach a human) once capacity frees up.
+      if (createdThisSend && caught instanceof ApiError && caught.status === 429) {
+        commit({ activeId: null, sessions: storeRef.current.sessions.filter((entry) => entry.id !== active!.id) });
+        setConversation(null);
+        setMessages([]);
+      }
       setError(errorMessage(caught));
     } finally {
       setBusy(null);
@@ -311,6 +329,30 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
       setRatingBusy(false);
     }
   };
+
+  const handleMessageFeedback = useCallback(
+    async (
+      messageId: string,
+      feedback: {
+        helpful: boolean;
+        reason?: 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human' | null;
+        comment?: string | null;
+      },
+    ) => {
+      const id = conversation?.id;
+      const token = tokenFor(id);
+      if (!id || !token) return;
+      try {
+        await customerApi.feedback(id, token, messageId, feedback);
+        const detail = await customerApi.get(id, token);
+        setConversation(detail.conversation);
+        setMessages(detail.messages);
+      } catch (err) {
+        console.error('Failed to submit message feedback:', err);
+      }
+    },
+    [conversation?.id, tokenFor],
+  );
 
   const startNew = () => {
     commit({ activeId: null, sessions: storeRef.current.sessions });
@@ -424,6 +466,29 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               ? 'Answers come from the CodeBuddy agent and your support knowledge base.'
               : 'This workspace runs in demo mode: answers are deterministic and come from the sample knowledge base. Try one of the scripted starters above the chat box.'}
           </p>
+
+          <div className="card" style={{ marginTop: 22, border: '1px solid var(--border)' }}>
+            <div className="card-head" style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+              <div className="row" style={{ gap: 7 }}>
+                <Sparkles size={14} aria-hidden="true" style={{ color: 'var(--brand)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>The 30-Second Proof</span>
+              </div>
+            </div>
+            <div style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.5, color: 'var(--muted)' }}>
+              <p style={{ margin: '0 0 8px' }}>Watch the core Relay loop in 3 clicks:</p>
+              <ol style={{ paddingLeft: 16, margin: 0 }}>
+                <li style={{ marginBottom: 6 }}>
+                  <strong>Policy answer:</strong> Click starter #1 &rarr; Relay cites shipping and refund policies.
+                </li>
+                <li style={{ marginBottom: 6 }}>
+                  <strong>Knowledge gap:</strong> Click starter #2 &rarr; Relay refuses to fabricate citations and offers human handoff.
+                </li>
+                <li>
+                  <strong>Human inbox:</strong> Click &ldquo;Request a human&rdquo; &rarr; Head back to the workspace to see full context, cited policies, and resolve the thread.
+                </li>
+              </ol>
+            </div>
+          </div>
         </aside>
 
         <section className="chat-panel" aria-label="Support chat">
@@ -453,6 +518,8 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
                     key={message.id}
                     message={message}
                     faqs={faqs}
+                    allowFeedback={!resolved && !waiting}
+                    onFeedback={handleMessageFeedback}
                     onOpenSource={(source) => {
                       const lastUser = [...messages].reverse().find((entry) => entry.role === 'user');
                       if (lastUser) lastCustomerQueryRef.value = lastUser.content;
