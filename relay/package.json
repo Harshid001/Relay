@@ -28,6 +28,6 @@
     }
   },
   "allowScripts": {
-    "esbuild": "true"
+    "esbuild": true
   }
 }
