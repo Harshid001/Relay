@@ -31,7 +31,7 @@ const ConversationSchema = {
   type: 'object',
   required: [
     'id', 'customer', 'email', 'title', 'intent', 'status', 'assignee', 'rating',
-    'createdAt', 'updatedAt', 'preview', 'isDemo', 'escalationReason',
+    'createdAt', 'updatedAt', 'preview', 'escalationReason',
   ],
   properties: {
     id: { type: 'string' },
@@ -45,7 +45,6 @@ const ConversationSchema = {
     createdAt: { type: 'string' },
     updatedAt: { type: 'string' },
     preview: { type: 'string' },
-    isDemo: { type: 'boolean' },
     escalationReason: { type: ['string', 'null'] },
   },
 };
@@ -67,7 +66,7 @@ const MessageSchema = {
         properties: { id: { type: 'string' }, title: { type: 'string' } },
       },
     },
-    provider: { type: 'string', enum: ['demo', 'codebuddy', 'human'] },
+    provider: { type: 'string', enum: ['codebuddy', 'human'] },
   },
 };
 
@@ -464,7 +463,7 @@ export const openapi: OpenApiDocument = {
         required: ['status', 'mode', 'adminAuthRequired'],
         properties: {
           status: { type: 'string' },
-          mode: { type: 'string', enum: ['demo', 'live'] },
+          mode: { type: 'string', enum: ['live'] },
           adminAuthRequired: { type: 'boolean' },
           plan: { type: 'string' },
         },
@@ -492,7 +491,7 @@ export const openapi: OpenApiDocument = {
           avgResponseSeconds: { type: ['number', 'null'] },
           waiting: { type: 'number' },
           ratingCount: { type: 'number' },
-          mode: { type: 'string', enum: ['demo', 'live'] },
+          mode: { type: 'string', enum: ['live'] },
         },
       },
       Usage: {

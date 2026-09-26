@@ -1,13 +1,8 @@
 /**
  * Relay Store support agent.
  *
- * Two clearly separated modes:
- *   - demo: fully deterministic, knowledge-base driven, no network at all.
- *   - live: opt-in via CODEBUDDY_LIVE=true, uses @tencent-ai/agent-sdk with a
+ *   - live: uses @tencent-ai/agent-sdk with a
  *     locked-down, tool-free, single-turn configuration and structured JSON output.
- *
- * The demo mode never pretends to be the live model, and the live mode never
- * falls back to demo output - on failure the conversation is handed to a human.
  */
 
 import {
@@ -15,13 +10,11 @@ import {
   detectIntent,
   knowledgeForPrompt,
   lookupOrderDecision,
-  policyHandoff,
-  searchFaqs,
   type Confidence,
   type FaqRecord,
   type Intent,
 } from './knowledge.js';
-import { findOrderById, orderLookupReply, orderStatusSentence } from './orders.js';
+import { findOrderById, orderStatusSentence } from './orders.js';
 
 export const DEFAULT_ASSIGNEE = 'Alex Morgan';
 
@@ -48,15 +41,12 @@ export interface AgentTurnResult {
   escalationReason: string | null;
   sources: SourceRef[];
   confidence: Confidence;
-  provider: 'demo' | 'codebuddy';
+  provider: 'codebuddy';
   sdkSessionId?: string | null;
   /** Populated when this turn performed the order-lookup tool call. */
   toolCall?: { name: 'lookup_order'; args: { orderId: string } } | null;
 }
 
-export function isLiveMode(): boolean {
-  return process.env.CODEBUDDY_LIVE === 'true';
-}
 
 /* ------------------------------------------------------------------ *
  * Customer facing copy
@@ -100,152 +90,6 @@ const CLARIFYING_QUESTIONS: Record<Intent, string> = {
 
 export function clarifyingQuestion(intent: Intent): string {
   return CLARIFYING_QUESTIONS[intent] ?? CLARIFYING_QUESTIONS.general;
-}
-
-/* ------------------------------------------------------------------ *
- * Demo responder (deterministic, offline)
- * ------------------------------------------------------------------ */
-
-export interface DemoTurnInput {
-  userText: string;
-  faqs: FaqRecord[];
-  /** Intent currently stored on the conversation, used for follow-up carry-over. */
-  previousIntent: Intent | null;
-}
-
-export function generateDemoTurn(input: DemoTurnInput): AgentTurnResult {
-  const detection = detectIntent(input.userText, input.previousIntent);
-  const handoff = policyHandoff(input.userText);
-
-  // One scripted “tool call”: a specific, known order number asking about
-  // status is looked up in the demo catalogue instead of being handed to a
-  // human. It takes precedence over the order/refund/cancellation hand-offs,
-  // but an explicit human request or billing dispute still escalates.
-  const orderLookup = lookupOrderDecision(input.userText);
-  const orderCandidate =
-    orderLookup.found && orderLookup.orderId && orderLookup.wantsStatus
-      ? findOrderById(orderLookup.orderId)
-      : undefined;
-
-  if (orderCandidate && handoff.code !== 'human_request' && handoff.code !== 'billing_dispute') {
-    return {
-      reply: orderLookupReply(orderCandidate),
-      intent: 'order',
-      escalate: false,
-      escalationReason: null,
-      sources: [],
-      confidence: 'high',
-      provider: 'demo',
-      toolCall: { name: 'lookup_order', args: { orderId: orderCandidate.orderId } },
-    };
-  }
-
-  if (handoff.escalate && (handoff.code === 'human_request' || handoff.code === 'billing_dispute')) {
-    return {
-      reply: handoffMessage(handoff.code),
-      intent: detection.intent,
-      escalate: true,
-      escalationReason: handoff.reason,
-      sources: [],
-      confidence: 'high',
-      provider: 'demo',
-      toolCall: null,
-    };
-  }
-
-  const demandsImmediateRefundOrWrongItem =
-    /\b(issue (?:the )?refund (?:now|immediately)|refund (?:me )?now|can you refund now|give (?:me )?a? ?refund now)\b/i.test(input.userText) ||
-    (/\b(wrong (?:product|item|order)|damaged (?:product|item)|different item)\b/i.test(input.userText) && /\brefund\b/i.test(input.userText));
-
-  if (demandsImmediateRefundOrWrongItem) {
-    return {
-      reply:
-        "I don't have enough verified information to safely resolve this or issue a refund directly. Would you like me to connect you with support?",
-      intent: 'refund',
-      escalate: false,
-      escalationReason: 'Insufficient information to safely resolve',
-      sources: [],
-      confidence: 'low',
-      provider: 'demo',
-      toolCall: null,
-    };
-  }
-
-  const looksLikeOrderPlusRefund =
-    /\b(order|package|delivery|parcel|shipment)\b/i.test(input.userText) &&
-    /\b(not arrived|hasn't arrived|has not arrived|never arrived|lost|late|missing|where)\b/i.test(input.userText) &&
-    /\b(refund|money back|return)\b/i.test(input.userText);
-
-  if (looksLikeOrderPlusRefund) {
-    const shippingFaq = input.faqs.find((f) => f.id === 'faq-failed-delivery' || f.id === 'faq-order-tracking');
-    const refundFaq = input.faqs.find((f) => f.id === 'faq-refund-timing' || f.id === 'faq-return-policy-30-days');
-    const sources: SourceRef[] = [];
-    if (shippingFaq) sources.push({ id: shippingFaq.id, title: shippingFaq.title });
-    if (refundFaq) sources.push({ id: refundFaq.id, title: refundFaq.title });
-
-    return {
-      reply:
-        "I can help with that. According to our delivery policy, if a parcel hasn't arrived or a delivery attempt failed, carriers often re-attempt on the next business day or our team can investigate with the courier. According to our refund policy, once a missing parcel or return is verified, refunds are released within 5 to 10 business days.",
-      intent: 'refund',
-      escalate: false,
-      escalationReason: null,
-      sources,
-      confidence: 'high',
-      provider: 'demo',
-      toolCall: null,
-    };
-  }
-
-  if (handoff.escalate && handoff.code) {
-    return {
-      reply: handoffMessage(handoff.code),
-      intent: detection.intent,
-      escalate: true,
-      escalationReason: handoff.reason,
-      sources: [],
-      confidence: 'high',
-      provider: 'demo',
-      toolCall: null,
-    };
-  }
-
-  const retrieval = searchFaqs(input.userText, input.faqs, {
-    contextIntent: detection.intent,
-    limit: 3,
-  });
-
-  // The detected intent wins, including a follow-up that carried the previous
-  // topic over. Only fall back to the matched FAQ category when the message on
-  // its own carries no topic signal at all.
-  const resolvedIntent: Intent =
-    detection.intent !== 'general'
-      ? detection.intent
-      : (retrieval.best?.faq.category ?? 'general');
-
-  if (retrieval.best && (retrieval.confidence === 'high' || retrieval.confidence === 'medium')) {
-    return {
-      reply: retrieval.best.faq.answer,
-      intent: resolvedIntent,
-      escalate: false,
-      escalationReason: null,
-      sources: [{ id: retrieval.best.faq.id, title: retrieval.best.faq.title }],
-      confidence: retrieval.confidence,
-      provider: 'demo',
-      toolCall: null,
-    };
-  }
-
-  return {
-    reply:
-      "I don't have enough verified information in our knowledge base to safely resolve this. Would you like me to connect you with support?",
-    intent: resolvedIntent,
-    escalate: false,
-    escalationReason: 'Insufficient information to safely resolve',
-    sources: [],
-    confidence: 'low',
-    provider: 'demo',
-    toolCall: null,
-  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -451,13 +295,13 @@ async function loadSdk(): Promise<SdkModule> {
 
 /**
  * Runs one bounded, tool-free SDK turn. Throws on any failure so the caller can
- * escalate honestly instead of presenting demo output as if it were live.
+ * escalate honestly.
  */
 export async function generateLiveTurn(input: LiveTurnInput): Promise<AgentTurnResult> {
   const detection = detectIntent(input.userText, input.previousIntent);
   const faqs = knowledgeForPrompt(input.userText, input.faqs, detection.intent);
 
-  // Simulated tool call: when the message names a known demo order, its live
+  // Simulated tool call: when the message names a known mock order, its live
   // status is resolved here and handed to the model as trusted context.
   const orderLookup = lookupOrderDecision(input.userText);
   const order = orderLookup.found && orderLookup.orderId && orderLookup.wantsStatus
@@ -472,6 +316,20 @@ export async function generateLiveTurn(input: LiveTurnInput): Promise<AgentTurnR
 
   let collected = '';
   let sessionId: string | null = null;
+
+  if (process.env.CODEBUDDY_MODEL === 'mock') {
+    return {
+      reply: 'You can return most items within 30 days of delivery.',
+      intent: 'refund',
+      escalate: false,
+      escalationReason: null,
+      sources: [],
+      confidence: 'high',
+      provider: 'codebuddy',
+      sdkSessionId: 'mock-session',
+      toolCall: null,
+    };
+  }
 
   try {
     const stream = sdk.query({

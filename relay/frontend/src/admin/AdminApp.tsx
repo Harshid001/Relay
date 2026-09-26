@@ -143,49 +143,7 @@ export function SupportWidget() {
   );
 }
 
-/* ================================================================== *
- * Demo Workspace Notice Banner
- * ================================================================== */
 
-function DemoBanner({ onPreviewChat, onOpenKb }: { onPreviewChat: () => void; onOpenKb: () => void }) {
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed) return null;
-
-  return (
-    <aside className="demo-workspace-banner" aria-label="Demo workspace information">
-      <div className="demo-banner-content">
-        <span className="demo-banner-icon">
-          <Sparkles size={16} aria-hidden="true" />
-        </span>
-        <div className="demo-banner-text">
-          <span className="demo-banner-tag">Interactive Demo Mode</span>
-          <p className="demo-banner-desc">
-            You're exploring Relay with preloaded store policies and simulated conversations. Test AI answers in customer preview, edit policies, or connect your live store when ready.
-          </p>
-        </div>
-      </div>
-      <div className="demo-banner-actions">
-        <button type="button" className="btn btn-outline btn-xs" onClick={onPreviewChat}>
-          <MessageSquare size={13} aria-hidden="true" />
-          Test in customer chat
-        </button>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={onOpenKb}>
-          <BookOpen size={13} aria-hidden="true" />
-          Review policies
-        </button>
-        <button
-          type="button"
-          className="demo-banner-dismiss"
-          onClick={() => setDismissed(true)}
-          title="Dismiss banner"
-          aria-label="Dismiss demo banner"
-        >
-          <X size={14} aria-hidden="true" />
-        </button>
-      </div>
-    </aside>
-  );
-}
 
 /* ================================================================== *
  * Onboarding Card (Quick Setup Guide)
@@ -421,12 +379,12 @@ interface OverviewProps {
   onSeedSample: () => void;
   seedingSample: boolean;
   faqCount: number;
-  mode: 'demo' | 'live';
+
 }
 
 function OverviewPage({
   session, stats, statsLoading, conversations, loading, days, onDays, onOpen, onViewAll, onOpenKb,
-  onPreview, onNewConversation, onInstallWidget, onSeedSample, seedingSample, faqCount, mode,
+  onPreview, onNewConversation, onInstallWidget, onSeedSample, seedingSample, faqCount,
 }: OverviewProps) {
   const [query, setQuery] = useState('');
   const userName = getFriendlyName(session, 'there');
@@ -526,7 +484,6 @@ function OverviewPage({
               <div className="card-title">Conversation volume</div>
               <div className="card-sub">
                 Conversations started per day, split by who handled them.
-                {mode === 'demo' ? ' Demo workspace data.' : ''}
               </div>
             </div>
           </div>
@@ -826,10 +783,10 @@ interface DrawerProps {
   onUpdated: (conversation: Conversation) => void;
   onOpenSource: (source: { id: string; title: string }) => void;
   onError: (error: unknown) => void;
-  mode: 'demo' | 'live';
+
 }
 
-function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSource, onError, mode }: DrawerProps) {
+function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSource, onError }: DrawerProps) {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [reply, setReply] = useState('');
@@ -988,7 +945,7 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
               {conversation.rating ? (
                 <span className="pill">Rated {conversation.rating}/5</span>
               ) : null}
-              {conversation.isDemo ? <span className="badge badge-demo">Sample data</span> : null}
+
             </div>
           ) : null}
         </div>
@@ -1051,7 +1008,7 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
                     )}
                   </dd>
                   <dt>Answer source</dt>
-                  <dd>{mode === 'live' ? 'CodeBuddy agent, grounded in the knowledge base' : 'Demo agent, grounded in the knowledge base'}</dd>
+                  <dd>CodeBuddy agent, grounded in the knowledge base</dd>
                 </dl>
                 <div className="row row-wrap" style={{ marginTop: 16 }}>
                   <button
@@ -1762,7 +1719,7 @@ function AnalyticsPage({
               <tr>
                 <td><strong>4. Knowledge added</strong></td>
                 <td><span className="badge badge-ok">Active</span></td>
-                <td>Upload FAQ / Paste text / 1-click Acme demo policies</td>
+                <td>Upload FAQ / Paste text</td>
                 <td className="cell-muted">Verified articles</td>
               </tr>
               <tr>
@@ -1820,7 +1777,7 @@ function SettingsPage({
   healthError: string | null;
   onRefreshHealth: () => void;
 }) {
-  const mode = health?.mode ?? 'demo';
+
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [sysReport, setSysReport] = useState<SystemHealthReport | null>(null);
@@ -2048,8 +2005,8 @@ function SettingsPage({
               <div className="card-title">Runtime status</div>
               <div className="card-sub">Read from the server at <span className="code">GET /api/health</span>.</div>
             </div>
-            <span className={`badge ${mode === 'live' ? 'badge-ok' : 'badge-demo'}`}>
-              {mode === 'live' ? 'Live mode' : 'Demo mode'}
+            <span className="badge badge-ok">
+              Live mode
             </span>
           </div>
           <div className="card-pad">
@@ -2060,11 +2017,7 @@ function SettingsPage({
                 <dt>Health</dt>
                 <dd>{health ? health.status : 'unknown'}</dd>
                 <dt>Answer engine</dt>
-                <dd>
-                  {mode === 'live'
-                    ? 'CodeBuddy agent, answering only from the knowledge base.'
-                    : 'Deterministic demo agent, answering only from the knowledge base.'}
-                </dd>
+                <dd>CodeBuddy agent, answering only from the knowledge base.</dd>
                 <dt>Admin auth</dt>
                 <dd>
                   {health?.adminAuthRequired
@@ -2072,11 +2025,7 @@ function SettingsPage({
                     : 'Not required — the server has no ADMIN_TOKEN set.'}
                 </dd>
                 <dt>Data source</dt>
-                <dd>
-                  {mode === 'live'
-                    ? 'Live conversations recorded in the server database.'
-                    : 'Demo mode. Any sample conversations here are seeded demonstration data, not live customer performance.'}
-                </dd>
+                <dd>Live conversations recorded in the server database.</dd>
               </dl>
             )}
           </div>
@@ -2097,15 +2046,14 @@ function SettingsPage({
             </p>
             <dl className="kv" style={{ marginTop: 16 }}>
               <dt><span className="code">CODEBUDDY_LIVE</span></dt>
-              <dd>Set to <span className="code">true</span> to answer with the CodeBuddy agent. Left unset, the deterministic demo agent is used.</dd>
+              <dd>Set to <span className="code">true</span> to answer with the CodeBuddy agent.</dd>
               <dt><span className="code">ADMIN_TOKEN</span></dt>
               <dd>Optional shared secret. When set, this workspace asks for it once per browser session and sends it as <span className="code">x-admin-token</span>.</dd>
               <dt><span className="code">MONGODB_URI</span></dt>
               <dd>Connection string for the MongoDB server. Defaults to <span className="code">mongodb://127.0.0.1:27017</span>; use an Atlas URI in production.</dd>
               <dt><span className="code">DATA_DIR</span></dt>
               <dd>Directory for local artifacts. Defaults to the server working directory.</dd>
-              <dt><span className="code">SEED_DEMO</span></dt>
-              <dd>Set to <span className="code">true</span> to seed sample conversations on first start. Unset or <span className="code">false</span> starts with an empty workspace.</dd>
+
               <dt><span className="code">PORT</span></dt>
               <dd>Port the API listens on. Defaults to <span className="code">3000</span>; the dev client proxies <span className="code">/api</span> to it.</dd>
             </dl>
@@ -2127,7 +2075,7 @@ function SettingsPage({
               the knowledge base as context and returns a structured reply plus the article ids it used.
             </p>
             <p className="note" style={{ marginTop: 10 }}>
-              If that call fails, the conversation is handed to a human instead of falling back to demo answers, so
+              If that call fails, the conversation is handed to a human, so
               customers never see a guess presented as a real answer.
             </p>
           </div>
@@ -2254,8 +2202,7 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
       setAuthNeeded(false);
       setToast((current) => (current && current.kind === 'error' ? null : current));
 
-      // Detect conversations that just joined the human queue so the UI can
-      // flag them as fresh during a live demo.
+      // flag them as fresh.
       const newlyWaiting: string[] = [];
       const nextSnapshot = new Map<string, string>();
       for (const conversation of page.items) {
@@ -2337,8 +2284,7 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
     return () => { cancelled = true; };
   }, [days, ready, handleError, retryToken]);
 
-  // Poll faster while anything is waiting in the human queue so a demo with
-  // two screens side by side shows the ticket appear within a couple seconds.
+  // Poll faster while anything is waiting in the human queue.
   const waitingCount = conversations.filter((conversation) => conversation.status === 'waiting').length;
   useEffect(() => {
     if (!ready || authNeeded) return;
@@ -2467,7 +2413,7 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
   if (waiting !== lastBadgeRef.current.waiting) {
     lastBadgeRef.current.waiting = waiting;
   }
-  const mode = health?.mode ?? stats?.mode ?? 'demo';
+
   const sourceFaq = source ? faqs.find((faq) => faq.id === source.id) ?? null : null;
 
   const navItems: Array<{ id: Page; label: string; icon: ReactNode; badge?: number }> = [
@@ -2489,7 +2435,7 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
           <span className="workspace-avatar" aria-hidden="true">AS</span>
           <div className="workspace-meta">
             <div className="workspace-name">Acme Studio</div>
-            <div className="workspace-sub">{mode === 'live' ? 'Live workspace' : 'Demo workspace'}</div>
+            <div className="workspace-sub">Live workspace</div>
           </div>
         </div>
 
@@ -2550,12 +2496,6 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
       </nav>
 
       <main className="main">
-        {mode === 'demo' ? (
-          <DemoBanner
-            onPreviewChat={onPreviewChat}
-            onOpenKb={openKnowledge}
-          />
-        ) : null}
 
         {page === 'overview' ? (
           <OverviewPage
@@ -2575,7 +2515,6 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
             onSeedSample={handleSeedSample}
             seedingSample={seedingSample}
             faqCount={faqs.length}
-            mode={mode}
           />
         ) : null}
 
@@ -2619,7 +2558,6 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
           id={openId}
           session={session}
           faqs={faqs}
-          mode={mode}
           onClose={closeDrawer}
           onUpdated={updateConversation}
           onOpenSource={setSource}

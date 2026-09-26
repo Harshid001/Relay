@@ -38,9 +38,9 @@ export async function launchServer(): Promise<LaunchedServer> {
       env: {
         ...process.env,
         DATA_DIR: dataDir,
-        ADMIN_TOKEN: '',
-        SEED_DEMO: 'false',
-        CODEBUDDY_LIVE: 'false',
+        ADMIN_TOKEN: 'e2e-admin-token',
+        CODEBUDDY_MODEL: 'mock',
+
         RESEND_API_KEY: '',
         BOOTSTRAP_ADMIN_EMAIL: 'e2e-owner@relay.test',
         BOOTSTRAP_ADMIN_PASSWORD: 'e2e-owner-pass-123',

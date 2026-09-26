@@ -11,8 +11,8 @@
  * - Audit: role-protected mutations append an audit_events document.
  *
  * Backward compatibility: when no users exist yet, the legacy single-token
- * admin mode still works (see requireUser), so existing deployments and the
- * seeded demo keep functioning until the first admin is provisioned.
+ * admin mode still works (see requireUser), so existing deployments
+ * keep functioning until the first admin is provisioned.
  */
 
 import crypto from 'node:crypto';
@@ -339,7 +339,6 @@ export const attachUser: RequestHandler = (req, res, next) => {
     if (!hasUsers) {
       const legacy = req.get('x-admin-token') ?? '';
       const expected = (process.env.ADMIN_TOKEN ?? '').trim();
-      const path = req.path ?? '';
       if (expected && legacy.length > 0) {
         const a = crypto.createHash('sha256').update(legacy, 'utf8').digest();
         const b = crypto.createHash('sha256').update(expected, 'utf8').digest();
@@ -347,17 +346,6 @@ export const attachUser: RequestHandler = (req, res, next) => {
           req.user = implicitAdmin();
           req.authMethod = 'admin-token';
         }
-      } else if (
-        !expected &&
-        process.env.CODEBUDDY_LIVE !== 'true' &&
-        (path.startsWith('/api/admin') || path.startsWith('/api/v1/admin')) &&
-        isLoopbackRequest(req)
-      ) {
-        // Open demo mode only (no ADMIN_TOKEN, no accounts, not live): admin
-        // routes stay reachable on loopback. Remote requests fail closed
-        // (401), and live mode never grants implicit admin.
-        req.user = implicitAdmin();
-        req.authMethod = 'loopback';
       }
     }
     next();

@@ -206,7 +206,7 @@ class TelemetryCollector {
           : 'healthy',
       latencyMs: this.aiLastLatencyMs ?? undefined,
       details: {
-        mode: params.isLive ? 'codebuddy' : 'demo',
+        mode: 'codebuddy',
         requestsTotal: this.aiRequestsTotal,
         failuresTotal: this.aiFailuresTotal,
         avgLatencyMs: avgAiMs,

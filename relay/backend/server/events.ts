@@ -98,10 +98,14 @@ export async function startEventBridge(db: Db): Promise<void> {
         deliver(doc.event);
       }
     });
-    stream.on('error', (error) => {
+    stream.on('error', (error: any) => {
       telemetry.recordSseFailure();
-      log.error('realtime_stream_error', { error: String(error) });
       bridge = null;
+      if (error?.message?.includes('$changeStream stage is only supported on replica sets')) {
+        log.warn('realtime_bridge_unavailable', { error: String(error) });
+      } else {
+        log.error('realtime_stream_error', { error: String(error) });
+      }
     });
     bridge = { collection };
     log.info('realtime_bridge_started', {});

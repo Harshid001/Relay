@@ -51,7 +51,6 @@ export const STATUS_LABEL: Record<ConversationStatus, string> = {
 };
 
 export const PROVIDER_LABEL: Record<string, string> = {
-  demo: 'Demo agent',
   codebuddy: 'CodeBuddy',
   human: 'Human agent',
 };
@@ -118,7 +117,7 @@ export function errorMessage(error: unknown): string {
 
 /**
  * Highlights the sentence of a cited FAQ answer that matches the customer's
- * question terms, so the demo can point at the exact support-policy line used.
+ * question terms, pointing at the exact support-policy line used.
  */
 export function CitedAnswer({ faq }: { faq: Faq }) {
   const query = lastCustomerQueryRef.value;

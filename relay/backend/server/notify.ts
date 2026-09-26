@@ -3,8 +3,7 @@
  *
  * Provider-agnostic: any SMTP-style delivery function can be plugged in.
  * Out of the box it supports Resend's simple HTTP API (no SDK needed) when
- * RESEND_API_KEY is set, and otherwise degrades to a console stub so the
- * demo runs with zero configuration.
+ * RESEND_API_KEY is set, and otherwise degrades to a console stub.
  *
  * Gated by NOTIFY_EMAILS (comma-separated recipients). All notifications are
  * fire-and-forget: a mail failure is logged and never affects the request.
@@ -119,7 +118,7 @@ export async function sendVerificationEmail(toEmail: string, code: string, magic
     log.info('verification_email_sent', { to: toEmail });
     return true;
   } else {
-    // Development / demo fallback: logged to console so login works without email provider
+    // Development fallback: logged to console so login works without email provider
     console.log(`[relay auth] Verification code for ${toEmail}: ${code}${magicLink ? ` (Link: ${magicLink})` : ''}`);
     log.info('verification_email_stub', { to: toEmail, code });
     return false;

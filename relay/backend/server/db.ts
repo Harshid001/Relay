@@ -14,7 +14,6 @@
  *   idempotency_keys  - TTL collection: entries expire after 24h (replaces the
  *                       manual DELETE sweep.
  *   faqs              - one doc per knowledge base article.
- *   meta              - key/value markers (demo seeding).
  *   rate_limits       - fixed-window abuse counters, TTL-cleaned (see
  *                       server/ratelimit.ts).
  *   turn_locks        - one doc per in-flight assistant turn, TTL = crash
@@ -34,8 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import { MongoClient, type Collection, type Db, type WithId } from 'mongodb';
 
-import { SEED_FAQS, type Intent } from './knowledge.js';
-import { findOrderById, orderStatusSentence } from './orders.js';
+import { type Intent } from './knowledge.js';
 import { runMigrations } from './migrations.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -75,11 +73,10 @@ if (!fs.existsSync(DATA_DIR)) {
 /**
  * Connection configuration.
  *   MONGODB_URI  - connection string; defaults to the local development server.
- *   MONGODB_DB   - database name; demo and live modes use separate databases so
- *                  live conversations never mix with demo records.
+ *   MONGODB_DB   - database name
  */
 const MONGODB_URI = (process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017').trim();
-export const DB_NAME = (process.env.MONGODB_DB ?? (IS_LIVE ? 'relay_live' : 'relay')).trim();
+export const DB_NAME = (process.env.MONGODB_DB ?? 'relay_live').trim();
 
 let client: MongoClient | null = null;
 let connectPromise: Promise<MongoClient> | null = null;
@@ -193,7 +190,6 @@ interface ConversationDoc {
   assignee: string | null;
   rating: number | null;
   escalation_reason: string | null;
-  is_demo: boolean;
   low_confidence_streak: number;
   unresolved_streak: number;
   preview: string;
@@ -252,10 +248,6 @@ export interface KnowledgeGapDoc {
   resolved_at?: string | null;
 }
 
-interface MetaDoc {
-  _id: string;
-  value: string;
-}
 
 function conversations(): Collection<ConversationDoc> {
   return database!.collection<ConversationDoc>('conversations');
@@ -272,9 +264,6 @@ function faqsCollection(): Collection<FaqDoc> {
 function knowledgeGaps(): Collection<KnowledgeGapDoc> {
   return database!.collection<KnowledgeGapDoc>('knowledge_gaps');
 }
-function meta(): Collection<MetaDoc> {
-  return database!.collection<MetaDoc>('meta');
-}
 
 /* ------------------------------------------------------------------ *
  * Public types (mirrors the API contract)
@@ -282,7 +271,7 @@ function meta(): Collection<MetaDoc> {
 
 export type ConversationStatus = 'open' | 'waiting' | 'resolved';
 export type MessageRole = 'user' | 'assistant' | 'human' | 'system';
-export type MessageProvider = 'demo' | 'codebuddy' | 'human';
+export type MessageProvider = 'codebuddy' | 'human';
 export type SourceRef = { id: string; title: string };
 
 export interface Conversation {
@@ -297,7 +286,6 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   preview: string;
-  isDemo: boolean;
   escalationReason: string | null;
 }
 
@@ -423,7 +411,6 @@ function mapConversation(doc: WithId<ConversationDoc>): Conversation {
     createdAt: doc.created_at,
     updatedAt: doc.updated_at,
     preview: doc.preview ?? '',
-    isDemo: doc.is_demo === true,
     escalationReason: doc.escalation_reason ?? null,
   };
 }
@@ -510,7 +497,6 @@ export async function getConversationRow(id: string): Promise<ConversationRow | 
 export interface CreateConversationInput {
   customer?: string;
   email?: string;
-  isDemo?: boolean;
 }
 
 export interface CreatedConversation {
@@ -536,7 +522,6 @@ export async function createConversation(input: CreateConversationInput = {}): P
     assignee: null,
     rating: null,
     escalation_reason: null,
-    is_demo: input.isDemo === true,
     low_confidence_streak: 0,
     unresolved_streak: 0,
     preview: '',
@@ -737,30 +722,7 @@ export async function resolveKnowledgeGap(id: string): Promise<boolean> {
   return result.matchedCount > 0;
 }
 
-export async function seedSampleKnowledge(): Promise<Faq[]> {
-  const existing = await faqsCollection().find().toArray();
-  const existingIds = new Set(existing.map((f) => f._id));
-  const toInsert: FaqDoc[] = [];
 
-  for (const faq of SEED_FAQS) {
-    if (!existingIds.has(faq.id)) {
-      toInsert.push({
-        _id: faq.id,
-        title: faq.title,
-        answer: faq.answer,
-        category: faq.category,
-        tags: faq.tags,
-        updated_at: nowIso(),
-      });
-    }
-  }
-
-  if (toInsert.length > 0) {
-    await faqsCollection().insertMany(toInsert);
-  }
-
-  return listFaqs();
-}
 
 /* ------------------------------------------------------------------ *
  * Idempotency
@@ -1009,554 +971,4 @@ export async function getStats(days: number): Promise<StatsResult> {
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Demo seed data
- * ------------------------------------------------------------------ */
 
-interface SeedTurn {
-  role: 'user' | 'assistant' | 'human' | 'system';
-  content: string;
-  provider?: 'demo' | 'human';
-  sources?: SourceRef[];
-  tool?: ToolEventRecord | null;
-}
-
-interface SeedScenario {
-  intent: Intent;
-  title: string;
-  status: ConversationStatus;
-  escalationReason?: string;
-  assignee?: string;
-  rating?: number;
-  turns: SeedTurn[];
-}
-
-function faqSource(id: string): SourceRef[] {
-  const faq = SEED_FAQS.find((entry) => entry.id === id);
-  return faq ? [{ id: faq.id, title: faq.title }] : [];
-}
-
-const FAQ_ANSWER = (id: string): string => SEED_FAQS.find((entry) => entry.id === id)?.answer ?? '';
-
-const HANDOFF_REFUND_STATUS =
-  "Refund status is tied to your specific order and payment provider, and I can't read it from here. I've handed this conversation to a human agent who can check it with the payments team - nothing was lost, your message and the full history go with it.";
-
-const HANDOFF_ORDER_LOOKUP =
-  "This prototype has no live order or carrier integration, so I can't read your order's status. I've passed this to a human agent who can look the order up for you.";
-
-const HANDOFF_CANCEL =
-  "Cancelling depends on the live state of your order, which I can't read or change from here. I've passed this to a human agent who can action it - your message is saved, so you don't need to repeat it.";
-
-const HANDOFF_ACCOUNT =
-  "Account changes need identity verification, which I can't do in this chat. I've handed this to a human agent who will verify you first. We'll never ask for your password.";
-
-const HANDOFF_HUMAN =
-  "Of course - I'm passing this conversation to a human agent now. You don't need to repeat anything, the full history goes with it. Support is staffed Monday to Friday, 9am to 6pm.";
-
-const HANDOFF_BILLING =
-  "I can't look at or change billing from here, so I've handed this to a human agent who can check it with the payments team.";
-
-const HANDOFF_REPEATED =
-  "I haven't been able to resolve this from the knowledge base, so I've handed the conversation to a human agent rather than guess. Everything you've sent is saved.";
-
-const CLARIFY_TECHNICAL =
-  "I want to point you at the right fix rather than guess. Are you having trouble signing in, seeing an error on a page, or something not updating on the site?";
-
-const SEED_SCENARIOS: SeedScenario[] = [
-  {
-    intent: 'refund',
-    title: 'Return request: Studio headphones',
-    status: 'resolved',
-    assignee: 'Priya Nair',
-    rating: 5,
-    turns: [
-      { role: 'user', content: "Hi, I'd like to return a pair of Studio headphones I ordered last week.", provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-return-policy-30-days'), provider: 'demo', sources: faqSource('faq-return-policy-30-days') },
-      { role: 'user', content: "Got it, I'll start the return from my account. Thanks!", provider: 'demo' },
-      { role: 'assistant', content: 'Happy to help. If the return label gives you any trouble, ask for a human agent and we will pick it up from there.', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'How long refunds take',
-    status: 'resolved',
-    rating: 5,
-    turns: [
-      { role: 'user', content: 'How long do refunds normally take once they are approved?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-refund-timing'), provider: 'demo', sources: faqSource('faq-refund-timing') },
-      { role: 'user', content: 'Perfect, thanks.', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'No refund after two weeks',
-    status: 'waiting',
-    escalationReason: 'Refund status is account specific and needs a human agent',
-    turns: [
-      { role: 'user', content: 'I sent my return back two weeks ago and I still have no refund.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_REFUND_STATUS, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Refund status is account specific and needs a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'Asking for an immediate refund',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'Can you refund me right now? I changed my mind about the order.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-no-refunds-performed'), provider: 'demo', sources: faqSource('faq-no-refunds-performed') },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'Damaged jacket on arrival',
-    status: 'resolved',
-    assignee: 'Alex Morgan',
-    turns: [
-      { role: 'user', content: 'The jacket I received has a torn seam, can I get my money back?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-return-policy-30-days'), provider: 'demo', sources: faqSource('faq-return-policy-30-days') },
-      { role: 'user', content: 'Ok, starting the return now.', provider: 'demo' },
-      { role: 'human', content: "Thanks for waiting - I've added a note to your return so the team doesn't decline it for condition.", provider: 'human' },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'Refund not received after three weeks',
-    status: 'waiting',
-    escalationReason: 'Refund status is account specific and needs a human agent',
-    turns: [
-      { role: 'user', content: "Where is my refund? It's been almost three weeks.", provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_REFUND_STATUS, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Refund status is account specific and needs a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'Return window start date',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'Is the 30 day return window counted from the order date or the delivery date?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-return-policy-30-days'), provider: 'demo', sources: faqSource('faq-return-policy-30-days') },
-    ],
-  },
-  {
-    intent: 'refund',
-    title: 'Two charges for one order',
-    status: 'waiting',
-    escalationReason: 'Billing dispute needs a human agent',
-    turns: [
-      { role: 'user', content: 'There are two charges on my card for a single order.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_BILLING, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Billing dispute needs a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Where is my order',
-    status: 'waiting',
-    escalationReason: 'Order lookup needs live order access which this channel does not have',
-    turns: [
-      { role: 'user', content: 'Where is my order? It was supposed to arrive on Tuesday.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_ORDER_LOOKUP, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Order lookup needs live order access which this channel does not have', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'How do I track my order',
-    status: 'resolved',
-    assignee: 'Alex Morgan',
-    rating: 5,
-    turns: [
-      { role: 'user', content: 'How do I track my order?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-order-tracking'), provider: 'demo', sources: faqSource('faq-order-tracking') },
-      { role: 'user', content: 'Thanks, I found the email.', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Order #4471 status lookup',
-    status: 'open',
-    turns: [
-      { role: 'user', content: "Where's my order #4471? It was supposed to arrive today.", provider: 'demo' },
-      {
-        role: 'assistant',
-        provider: 'demo',
-        content: orderStatusSentence(findOrderById('4471')!)
-          + ' It was loaded onto the delivery van this morning and should arrive today before 8 pm.',
-        tool: { name: 'lookup_order', args: { orderId: '4471' } },
-      },
-      { role: 'user', content: 'Perfect, thanks for checking!', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Parcel never showed up',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'My parcel never showed up.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-failed-delivery'), provider: 'demo', sources: faqSource('faq-failed-delivery') },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Cancel before shipping',
-    status: 'waiting',
-    escalationReason: 'Order cancellation depends on live order state and needs a human agent',
-    turns: [
-      { role: 'user', content: 'I need to cancel my order before it ships.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_CANCEL, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Order cancellation depends on live order state and needs a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Failed delivery attempt',
-    status: 'resolved',
-    rating: 4,
-    turns: [
-      { role: 'user', content: 'The carrier said the delivery attempt failed. What happens now?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-failed-delivery'), provider: 'demo', sources: faqSource('faq-failed-delivery') },
-      { role: 'user', content: "Great, I'll wait for the reattempt.", provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Tracking has not moved',
-    status: 'waiting',
-    escalationReason: 'Order lookup needs live order access which this channel does not have',
-    turns: [
-      { role: 'user', content: "Can you check my order? The tracking hasn't moved in four days.", provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_ORDER_LOOKUP, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Order lookup needs live order access which this channel does not have', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Update delivery address',
-    status: 'waiting',
-    escalationReason: 'Account changes require identity verification by a human agent',
-    turns: [
-      { role: 'user', content: 'How do I update the delivery address on an order I just placed?', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_ACCOUNT, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Account changes require identity verification by a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'order',
-    title: 'Meaning of failed delivery status',
-    status: 'open',
-    turns: [
-      { role: 'user', content: "What does 'delivery attempt failed' mean on my tracking?", provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-failed-delivery'), provider: 'demo', sources: faqSource('faq-failed-delivery') },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Cannot log in',
-    status: 'resolved',
-    assignee: 'Priya Nair',
-    rating: 5,
-    turns: [
-      { role: 'user', content: "I can't log in, it says my password is incorrect.", provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-login-password'), provider: 'demo', sources: faqSource('faq-login-password') },
-      { role: 'user', content: "The reset link worked, I'm in. Thanks!", provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Error at checkout',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'The site keeps showing an error when I try to check out.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-error-message'), provider: 'demo', sources: faqSource('faq-error-message') },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Cart empties on reload',
-    status: 'resolved',
-    assignee: 'Alex Morgan',
-    rating: 3,
-    turns: [
-      { role: 'user', content: 'My cart empties every time I reload the page.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-browser-cache'), provider: 'demo', sources: faqSource('faq-browser-cache') },
-      { role: 'user', content: 'Clearing the cache fixed it.', provider: 'demo' },
-      { role: 'human', content: 'Good to hear. If it comes back, the cart also depends on first-party cookies being allowed.', provider: 'human' },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'No verification email',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'I never got the verification email for my new account.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-email-verification'), provider: 'demo', sources: faqSource('faq-email-verification') },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Sign in still failing after cache clear',
-    status: 'waiting',
-    escalationReason: 'Two consecutive low confidence turns without resolution',
-    turns: [
-      { role: 'user', content: "I can't sign in to my account.", provider: 'demo' },
-      { role: 'assistant', content: CLARIFY_TECHNICAL, provider: 'demo' },
-      { role: 'user', content: 'It still does not work.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_REPEATED, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Two consecutive low confidence turns without resolution', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Blocked cookies sign me out',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'Cookies are blocked on my work laptop, is that why the site signs me out?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-cookies'), provider: 'demo', sources: faqSource('faq-cookies') },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Error 500 on returns page',
-    status: 'resolved',
-    rating: 5,
-    turns: [
-      { role: 'user', content: 'I get error 500 when I open the returns page.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-error-message'), provider: 'demo', sources: faqSource('faq-error-message') },
-      { role: 'user', content: 'Sent the screenshot, thanks.', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'technical',
-    title: 'Reset link expired',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'My password reset link says it expired.', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-login-password'), provider: 'demo', sources: faqSource('faq-login-password') },
-    ],
-  },
-  {
-    intent: 'general',
-    title: 'Wants a human agent',
-    status: 'waiting',
-    escalationReason: 'Customer asked to speak with a human agent',
-    turns: [
-      { role: 'user', content: 'Can I talk to a real person please?', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_HUMAN, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Customer asked to speak with a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'general',
-    title: 'Payments over chat',
-    status: 'resolved',
-    rating: 4,
-    turns: [
-      { role: 'user', content: 'Do you take card payments over chat?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-payment-actions'), provider: 'demo', sources: faqSource('faq-payment-actions') },
-      { role: 'user', content: 'Understood.', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'general',
-    title: 'Change account email',
-    status: 'waiting',
-    escalationReason: 'Account changes require identity verification by a human agent',
-    turns: [
-      { role: 'user', content: 'I want to change the email address on my account.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_ACCOUNT, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Account changes require identity verification by a human agent', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'general',
-    title: 'Support hours',
-    status: 'open',
-    turns: [
-      { role: 'user', content: 'What are your support hours?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-human-agent'), provider: 'demo', sources: faqSource('faq-human-agent') },
-    ],
-  },
-  {
-    intent: 'general',
-    title: 'Phone number request',
-    status: 'resolved',
-    assignee: 'Priya Nair',
-    rating: 5,
-    turns: [
-      { role: 'user', content: 'Is there a phone number I can call?', provider: 'demo' },
-      { role: 'assistant', content: FAQ_ANSWER('faq-human-agent'), provider: 'demo', sources: faqSource('faq-human-agent') },
-      { role: 'user', content: 'Fine, I will use this chat then.', provider: 'demo' },
-    ],
-  },
-  {
-    intent: 'general',
-    title: 'Delete my account',
-    status: 'waiting',
-    escalationReason: 'Account changes require identity verification by a human agent',
-    turns: [
-      { role: 'user', content: 'Please delete my account.', provider: 'demo' },
-      { role: 'assistant', content: HANDOFF_ACCOUNT, provider: 'demo' },
-      { role: 'system', content: 'Escalated to a human agent: Account changes require identity verification by a human agent', provider: 'demo' },
-    ],
-  },
-];
-
-const DEMO_CUSTOMERS: Array<{ name: string; email: string }> = [
-  { name: 'Maya Chen', email: 'maya.chen@example.com' },
-  { name: 'Daniel Okafor', email: 'd.okafor@example.com' },
-  { name: 'Sofia Marchetti', email: 'sofia.m@example.com' },
-  { name: 'Liam Whitfield', email: 'liam.whitfield@example.com' },
-  { name: 'Priyanka Rao', email: 'priyanka.rao@example.com' },
-  { name: 'Tomas Novak', email: 'tomas.novak@example.com' },
-  { name: 'Aisha Bello', email: 'aisha.bello@example.com' },
-  { name: 'Noah Lindqvist', email: 'noah.l@example.com' },
-  { name: 'Hannah Mbeki', email: 'hannah.mbeki@example.com' },
-  { name: 'Marco Ruiz', email: 'marco.ruiz@example.com' },
-  { name: 'Elena Petrova', email: 'elena.petrova@example.com' },
-  { name: 'Jonas Weber', email: 'jonas.weber@example.com' },
-  { name: 'Chloe Dubois', email: 'chloe.dubois@example.com' },
-  { name: 'Ravi Menon', email: 'ravi.menon@example.com' },
-  { name: 'Grace Kim', email: 'grace.kim@example.com' },
-];
-
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-async function seedDemoConversations(): Promise<void> {
-  const now = Date.now();
-  const rand = mulberry32(20260918);
-
-  for (let index = 0; index < SEED_SCENARIOS.length; index += 1) {
-    const scenario = SEED_SCENARIOS[index];
-    const customer = DEMO_CUSTOMERS[index % DEMO_CUSTOMERS.length];
-    const dayOffset = index % 7;
-    const shiftMinutes = (index % 9) * 37 + 20;
-    const startedAt = new Date(now - dayOffset * 86400000 - shiftMinutes * 60000);
-
-    const conversationId = newId();
-    let cursor = startedAt.getTime();
-    let updatedAt = startedAt.toISOString();
-
-    const doc: ConversationDoc = {
-      _id: conversationId,
-      customer: customer.name,
-      email: customer.email,
-      title: scenario.title,
-      intent: scenario.intent,
-      status: scenario.status,
-      assignee: scenario.assignee ?? null,
-      rating: scenario.rating ?? null,
-      escalation_reason: scenario.escalationReason ?? null,
-      is_demo: true,
-      low_confidence_streak: 0,
-      unresolved_streak: 0,
-      preview: '',
-      human_handled: scenario.turns.some((turn) => turn.role === 'human'),
-      token_hashes: [],
-      created_at: startedAt.toISOString(),
-      updated_at: startedAt.toISOString(),
-    };
-
-    await conversations().insertOne(doc);
-
-    for (let turnIndex = 0; turnIndex < scenario.turns.length; turnIndex += 1) {
-      const turn = scenario.turns[turnIndex];
-      if (turnIndex > 0) {
-        cursor += turn.role === 'user' ? 45000 + Math.floor(rand() * 90000) : 20000 + Math.floor(rand() * 40000);
-      }
-      const createdAt = new Date(cursor).toISOString();
-      updatedAt = createdAt;
-
-      await messages().insertOne({
-        _id: newId(),
-        conversation_id: conversationId,
-        role: turn.role,
-        content: turn.content,
-        provider: turn.provider ?? null,
-        sources: turn.sources ?? [],
-        tool: turn.tool ?? null,
-        created_at: createdAt,
-      });
-    }
-
-    const lastUser = [...scenario.turns].reverse().find((turn) => turn.role === 'user');
-    await conversations().updateOne(
-      { _id: conversationId },
-      { $set: { updated_at: updatedAt, preview: truncatePreview(lastUser?.content ?? '') } },
-    );
-  }
-}
-
-async function seedFaqsIfEmpty(): Promise<void> {
-  // Live deployments start with an empty knowledge base. The sample policies
-  // describe a made-up retailer, so they are only ever loaded on demand from
-  // the admin workspace ("Use sample policies").
-  if (IS_LIVE) return;
-  const count = await faqsCollection().countDocuments();
-  if (count > 0) return;
-  const updatedAt = nowIso();
-  await withTransaction(async () => {
-    for (const faq of SEED_FAQS) {
-      await faqsCollection().insertOne({
-        _id: faq.id,
-        title: faq.title,
-        answer: faq.answer,
-        category: faq.category,
-        tags: faq.tags,
-        updated_at: updatedAt,
-      });
-    }
-  });
-}
-
-async function seedDemoConversationsIfNeeded(): Promise<void> {
-  // Opt-in: demo conversations are seeded only when SEED_DEMO=true, so a fresh
-  // deploy with no configuration starts with an empty workspace.
-  if (process.env.SEED_DEMO !== 'true') return;
-  if (IS_LIVE) return;
-
-  const marker = await meta().findOne({ _id: 'demo_seeded' });
-  if (marker) return;
-
-  const count = await conversations().countDocuments();
-  if (count > 0) {
-    await meta().updateOne(
-      { _id: 'demo_seeded' },
-      { $set: { value: nowIso() } },
-      { upsert: true },
-    );
-    return;
-  }
-
-  await withTransaction(async () => {
-    await seedDemoConversations();
-    await meta().updateOne(
-      { _id: 'demo_seeded' },
-      { $set: { value: nowIso() } },
-      { upsert: true },
-    );
-  });
-}
-
-/**
- * Seeds the knowledge base and demo conversations only for the local demo
- * experience, and only when explicitly opted in:
- *   - FAQs: skipped entirely in live mode; otherwise seeded when empty.
- *   - Demo conversations: seeded once, only when SEED_DEMO=true.
- * A production deploy (CODEBUDDY_LIVE=true) starts with both empty. Called
- * during server startup after the database connection opens.
- */
-export async function seedDatabase(): Promise<void> {
-  await seedFaqsIfEmpty();
-  await seedDemoConversationsIfNeeded();
-}

@@ -29,7 +29,7 @@ interface Migration {
 
 const INTENTS = ['refund', 'order', 'technical', 'general'] as const;
 const MESSAGE_ROLES = ['user', 'assistant', 'human', 'system'] as const;
-const MESSAGE_PROVIDERS = ['demo', 'codebuddy', 'human'] as const;
+const MESSAGE_PROVIDERS = ['codebuddy', 'human'] as const;
 const ROLES = ['admin', 'agent'] as const;
 
 const CONVERSATION_SCHEMA = {
@@ -45,7 +45,7 @@ const CONVERSATION_SCHEMA = {
     escalation_reason: { bsonType: ['string', 'null'] },
     assignee: { bsonType: ['string', 'null'] },
     rating: { bsonType: ['int', 'double', 'null'] },
-    is_demo: { bsonType: 'bool' },
+
     low_confidence_streak: { bsonType: ['int', 'long', 'double'] },
     unresolved_streak: { bsonType: ['int', 'long', 'double'] },
     preview: { bsonType: 'string' },

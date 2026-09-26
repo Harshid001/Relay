@@ -5,10 +5,8 @@
  * Serves the production frontend from `dist/` with an SPA fallback and exposes
  * the customer + admin API contract.
  *
- * Modes:
- *   - demo (default): public local prototype. Every seeded conversation is marked
- *     `isDemo: true`; the frontend labels it. Admin routes are open on loopback.
- *   - live (CODEBUDDY_LIVE=true): requires ADMIN_TOKEN, otherwise startup fails.
+ *
+ * Requires ADMIN_TOKEN to run; otherwise startup fails.
  *
  * This file owns wiring and lifecycle only; the pieces live in focused modules:
  *   server/config.ts            environment config + Host/Origin guard
@@ -28,12 +26,12 @@ import * as auth from './auth.js';
 import {
   ADMIN_AUTH_REQUIRED,
   HOST,
-  LIVE,
   MODE,
   PORT,
   TRUST_PROXY_ENABLED,
   TRUST_PROXY_HOPS,
   hostOriginGuard,
+  assertLiveConfig,
 } from './config.js';
 import * as store from './db.js';
 import { startEventBridge } from './events.js';
@@ -210,10 +208,10 @@ let readyPromise: Promise<void> | null = null;
 
 export function ensureReady(): Promise<void> {
   readyPromise ??= (async () => {
+    assertLiveConfig();
     initMonitoring();
     initProcessErrorHandlers();
     await store.connectToDatabase();
-    await store.seedDatabase();
     await auth.initAuthCollections(store.getDb());
     await rateLimiters.initRateLimitCollections(store.getDb());
     await auth.bootstrapAdminFromEnv();
@@ -225,10 +223,10 @@ export function ensureReady(): Promise<void> {
 }
 
 export async function startServer(port: number = PORT, host: string = HOST) {
+  assertLiveConfig();
   initMonitoring();
   initProcessErrorHandlers();
   await store.connectToDatabase();
-  await store.seedDatabase();
   await auth.initAuthCollections(store.getDb());
   await rateLimiters.initRateLimitCollections(store.getDb());
   await auth.bootstrapAdminFromEnv();
@@ -238,9 +236,6 @@ export async function startServer(port: number = PORT, host: string = HOST) {
   const server = app.listen(port, host, () => {
     console.log(`[relay] Relay Store support backend listening on http://${host}:${port}`);
     console.log(`[relay] mode=${MODE} adminAuthRequired=${ADMIN_AUTH_REQUIRED} db=mongodb://${store.DB_NAME}`);
-    if (!LIVE) {
-      console.log('[relay] demo mode: public local prototype, seeded conversations are marked isDemo=true');
-    }
   });
 
   const shutdown = async (signal: string) => {

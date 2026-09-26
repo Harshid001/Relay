@@ -7,13 +7,12 @@
 
 import type { Request, RequestHandler, Response } from 'express';
 
-import { isLiveMode } from './agent.js';
 
 export const PORT = Number(process.env.PORT ?? 3000);
 export const HOST = process.env.HOST ?? '127.0.0.1';
 
-export const LIVE = isLiveMode();
-export const MODE: 'demo' | 'live' = LIVE ? 'live' : 'demo';
+export const LIVE = true;
+export const MODE = 'live';
 
 export const ADMIN_TOKEN = (process.env.ADMIN_TOKEN ?? '').trim();
 export const ADMIN_AUTH_REQUIRED = ADMIN_TOKEN.length > 0;
@@ -87,7 +86,6 @@ export function assertLiveConfig(): void {
   }
 }
 
-assertLiveConfig();
 
 /**
  * Sets the mode header and rejects requests whose Host or Origin is not an

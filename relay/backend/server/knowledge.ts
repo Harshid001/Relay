@@ -1,7 +1,7 @@
 /**
  * Relay Store support knowledge base.
  *
- * Deterministic, dependency-free helpers used by both the demo responder and the
+ * Deterministic, dependency-free helpers used by the
  * live (SDK backed) responder:
  *   - intent detection with synonym support and follow-up context carry-over
  *   - ranked FAQ retrieval over keyword synonyms
@@ -30,184 +30,7 @@ export type Confidence = 'high' | 'medium' | 'low' | 'none';
  * Seed knowledge base (fictional Relay Store)
  * ------------------------------------------------------------------ */
 
-export const SEED_FAQS: FaqRecord[] = [
-  {
-    id: 'faq-return-policy-30-days',
-    title: 'Return policy: 30 days, unused items only',
-    answer:
-      'Relay Store accepts returns within 30 days of delivery. Items must be unused, in their original packaging, and include every accessory that shipped with them. You start a return from Orders in your Relay Store account, which generates the return label. Returns that arrive used, damaged after delivery, or missing the original packaging can be declined. This chat cannot start or authorise a return for you.',
-    category: 'refund',
-    tags: [
-      'refund', 'refunds', 'refunded', 'return', 'returns', 'returning', 'return policy',
-      'money back', 'send back', 'send it back', '30 day', '30-day', 'unused', 'policy',
-      'window', 'eligibility', 'can i return', 'how do i return',
-    ],
-  },
-  {
-    id: 'faq-refund-timing',
-    title: 'Refund timing: 5 to 10 business days after approval',
-    answer:
-      'Once a return is approved, the refund is released to your original payment method and usually appears within 5 to 10 business days. Your bank or card issuer can add a few more days before it posts to your statement. Business days exclude weekends and public holidays. If more than 10 business days have passed since your approval email, a human agent can escalate it to the payments team.',
-    category: 'refund',
-    tags: [
-      'refund', 'refunds', 'refund timing', 'how long', 'business days', '5-10',
-      'pending', 'money back', 'when', 'how long do refunds take', 'refund time',
-      'delay', 'processing time',
-    ],
-  },
-  {
-    id: 'faq-no-refunds-performed',
-    title: 'Relay support never performs refunds',
-    answer:
-      'Relay Store chat support cannot move money. We never issue refunds directly, never reverse a charge, and never collect card, CVV or bank details. A refund is only released by the original payment provider after a return has been approved. Anyone asking you for payment details inside a Relay Store chat is not us.',
-    category: 'refund',
-    tags: [
-      'refund', 'refunds', 'refunded', 'money back', 'reimburse', 'reimbursement',
-      'chargeback', 'card', 'payment', 'billing', 'charged', 'refund me now',
-      'refund my card', 'reverse charge',
-    ],
-  },
-  {
-    id: 'faq-refund-status',
-    title: 'Checking the status of your own refund',
-    answer:
-      'Refund status is tied to your specific order and payment provider, so it cannot be read from this chat. Check the approval email from Relay Store for the expected date, then your bank statement. If that window has passed, a human agent can escalate it to the payments team.',
-    category: 'refund',
-    tags: [
-      'refund', 'refund status', 'my refund', 'where is my refund', 'has my refund',
-      'did my refund', 'pending refund', 'track refund', 'check my refund',
-      'still no refund', 'refund not received', 'refund not arrived', 'no refund yet',
-    ],
-  },
-  {
-    id: 'faq-order-tracking',
-    title: 'Tracking your order',
-    answer:
-      'This prototype has no live order or carrier integration, so no tracking state can be shown here. Your shipping confirmation email contains the carrier and the tracking number. If you never received a shipping confirmation, a human agent can check the order record.',
-    category: 'order',
-    tags: [
-      'order', 'orders', 'tracking', 'track', 'trace', 'tracking number', 'shipment',
-      'shipped', 'package', 'parcel', 'courier', 'eta', 'delivery', 'where is my order',
-      'order status', 'how do i track', 'dispatch', 'shipping confirmation',
-    ],
-  },
-  {
-    id: 'faq-failed-delivery',
-    title: 'Failed or missed delivery',
-    answer:
-      'When a delivery attempt fails, most carriers return the parcel to the local depot and try again on the next business day. If the carrier marked the parcel as delivered but you cannot find it, check with neighbours and your building office first. This chat cannot contact the carrier, so a human agent takes over if the parcel is still missing after that.',
-    category: 'order',
-    tags: [
-      'failed delivery', 'missed delivery', 'delivery attempt', 'not delivered',
-      'never arrived', 'has not arrived', 'did not arrive', 'lost package', 'lost parcel',
-      'missing parcel', 'missing package', 'delivery', 'courier', 'driver', 'attempted',
-      'late', 'delayed', 'delay',
-    ],
-  },
-  {
-    id: 'faq-cancel-order',
-    title: 'Cancelling an order',
-    answer:
-      'Cancelling depends on the live state of your order, which this chat cannot read or change. Cancellation requests are handled by a human agent: send your order number and a human agent will pick it up. If the parcel has already shipped, the normal return process applies instead.',
-    category: 'order',
-    tags: [
-      'cancel', 'cancelling', 'cancellation', 'cancel order', 'cancel my order',
-      'stop my order', 'call off', 'cancelled', 'before it ships',
-    ],
-  },
-  {
-    id: 'faq-login-password',
-    title: 'Cannot log in or reset your password',
-    answer:
-      'Use "Forgot password" on the Relay Store sign-in page and enter the email address on your account. The reset link is valid for 30 minutes and can only be used once. Check spam or junk if it does not arrive within a few minutes. After five failed attempts the account locks for 15 minutes.',
-    category: 'technical',
-    tags: [
-      'login', 'log in', 'sign in', 'signin', 'password', 'reset password', 'locked',
-      'locked out', 'account locked', 'credentials', 'cannot log in', 'cant log in',
-      '2fa', 'otp', 'one time code', 'verification code',
-    ],
-  },
-  {
-    id: 'faq-browser-cache',
-    title: 'Clearing your browser cache',
-    answer:
-      'A stale cache is the most common cause of a page that loads incorrectly or a cart that empties itself. Reload with Ctrl+Shift+R (Cmd+Shift+R on macOS), or open the site in a private/incognito window to test. To clear it fully: browser menu, Settings, Privacy and security, Clear browsing data, then select Cached images and files.',
-    category: 'technical',
-    tags: [
-      'cache', 'cached', 'clear cache', 'browser', 'hard refresh', 'incognito',
-      'private window', 'stale', 'old version', 'reload', 'cart empties', 'not updating',
-    ],
-  },
-  {
-    id: 'faq-cookies',
-    title: 'Cookies and site errors',
-    answer:
-      'Relay Store needs first-party cookies for sign-in and for the cart to work. If cookies are blocked the site will show errors or sign you out. Allow cookies for relaystore.example in your browser privacy settings, then reload the page. Blocking third-party cookies is fine and does not affect the store.',
-    category: 'technical',
-    tags: [
-      'cookies', 'cookie', 'enable cookies', 'blocked cookies', 'privacy settings',
-      'site error', 'signed out', 'session expired', 'keep getting logged out',
-    ],
-  },
-  {
-    id: 'faq-error-message',
-    title: 'Reporting an error message',
-    answer:
-      'Note the exact error text and, if one is shown, the reference code at the bottom of the message, plus the time it happened and the browser you used. That detail is what the engineering team needs, and a screenshot helps. If the error completely blocks a purchase or sign-in, ask for a human agent.',
-    category: 'technical',
-    tags: [
-      'error', 'error code', 'reference code', 'bug', 'glitch', 'crash', 'crashing',
-      'something went wrong', '500', 'exception', 'broken page', 'not working',
-      'does not work', 'doesnt work', 'wont load', 'failed',
-    ],
-  },
-  {
-    id: 'faq-email-verification',
-    title: 'Verification email not arriving',
-    answer:
-      'Verification emails usually arrive within a few minutes. Check spam, junk and promotions folders, and add no-reply@relaystore.example to your contacts. If your mailbox is full, or the address was mistyped, the message will bounce instead of arriving. You can request a new verification email from the account page once every 10 minutes.',
-    category: 'technical',
-    tags: [
-      'email', 'verification', 'verify', 'confirmation email', 'not receiving',
-      'didnt get email', 'no email', 'spam', 'junk', 'inbox', 'bounced', 'activation email',
-    ],
-  },
-  {
-    id: 'faq-human-agent',
-    title: 'Talking to a human agent',
-    answer:
-      'Relay Store support is staffed Monday to Friday, 9am to 6pm. Ask for a human agent at any point and the conversation is handed to the queue immediately - you do not need to repeat yourself, the full history goes with it. Outside those hours a human replies on the next business day.',
-    category: 'general',
-    tags: [
-      'human', 'agent', 'person', 'representative', 'someone real', 'talk to someone',
-      'support team', 'manager', 'escalate', 'real person', 'customer service',
-      'support hours', 'opening hours', 'when are you open',
-    ],
-  },
-  {
-    id: 'faq-payment-actions',
-    title: 'Payment details and payment actions',
-    answer:
-      'This chat can never take a payment, change a payment method, or collect card numbers, CVV codes or bank details. Payment changes must be made yourself in your Relay Store account under Payment methods, and any refund is always released through the original payment provider. Never share payment details in a support chat.',
-    category: 'general',
-    tags: [
-      'payment', 'payment method', 'card', 'card details', 'charged', 'charge',
-      'billing', 'invoice', 'receipt', 'paypal', 'cvv', 'update card', 'change card',
-    ],
-  },
-  {
-    id: 'faq-account-changes',
-    title: 'Account-specific changes',
-    answer:
-      'Changes such as updating the email address, merging accounts, or removing a saved address need identity verification and cannot be done from this chat. A human agent verifies you before any account change is made. We will never ask you for your password.',
-    category: 'general',
-    tags: [
-      'account', 'profile', 'account details', 'change email', 'update email',
-      'change address', 'update address', 'delete account', 'merge account',
-      'account settings', 'identity verification',
-    ],
-  },
-];
+export const SEED_FAQS: FaqRecord[] = [];
 
 /* ------------------------------------------------------------------ *
  * Text normalisation helpers
@@ -386,7 +209,7 @@ const BILLING_DISPUTE_RE =
 
 /**
  * Deterministic reasons to hand a conversation to a human immediately.
- * Used before any AI generation, in demo and live mode alike.
+ * Used before any AI generation.
  */
 export function policyHandoff(text: string): HandoffDecision {
   const hay = flattenText(text);
@@ -455,7 +278,7 @@ export function policyHandoff(text: string): HandoffDecision {
  * ------------------------------------------------------------------ */
 
 export interface OrderLookupDecision {
-  /** An order number was mentioned and resolved against the demo catalogue. */
+  /** An order number was mentioned and resolved against the mock catalogue. */
   found: boolean;
   orderId: string | null;
   /** True when the message asks about the state of a specific order. */
@@ -467,7 +290,7 @@ const ORDER_STATUS_ASK_RE =
 
 /**
  * Detects an order number in the message and whether the customer wants its
- * status. Used by both the demo responder (deterministic lookup) and the live
+ * status. Used by the live
  * responder (grounding context + citation), and by the API layer to keep the
  * catalogue data out of stored chat text.
  */

@@ -3,7 +3,7 @@
 export type Intent = 'refund' | 'order' | 'technical' | 'general';
 export type ConversationStatus = 'open' | 'waiting' | 'resolved';
 export type MessageRole = 'user' | 'assistant' | 'human' | 'system';
-export type Mode = 'demo' | 'live';
+export type Mode = 'live';
 
 export interface Conversation {
   id: string;
@@ -17,7 +17,6 @@ export interface Conversation {
   createdAt: string;
   updatedAt: string;
   preview: string;
-  isDemo: boolean;
   escalationReason: string | null;
 }
 
@@ -45,7 +44,7 @@ export interface Message {
   content: string;
   createdAt: string;
   sources: SourceRef[];
-  provider?: 'demo' | 'codebuddy' | 'human';
+  provider?: 'codebuddy' | 'human';
   /** Present on the assistant reply that performed a tool call. */
   tool?: ToolEvent | null;
   feedback?: MessageFeedback | null;

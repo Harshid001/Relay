@@ -339,11 +339,7 @@ a:hover {
   color: var(--primary);
   border-color: #d7e6db;
 }
-.badge-demo {
-  background: var(--lime-tint);
-  color: #4b5a24;
-  border-color: #e2ecc0;
-}
+
 .badge-neutral {
   background: #f1f3ef;
   color: var(--ink-soft);
@@ -1731,54 +1727,7 @@ table.data tbody tr.clickable:hover {
   color: var(--primary);
 }
 
-/* Demo starters ----------------------------------------------- */
 
-.starters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.starter {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 13px;
-  border-radius: 999px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-.starter:hover:not(:disabled) {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-tint);
-}
-
-.starter:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.starter-kbd {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--primary);
-  background: var(--primary-tint);
-  border-radius: 6px;
-  padding: 1px 6px;
-}
-
-.starter-kbd.order {
-  background: var(--lime-tint);
-  color: #55701f;
-}
 
 /* Tool-call trace --------------------------------------------- */
 
@@ -2279,9 +2228,7 @@ mark.cite .cite-note {
 
 /* Landing page --------------------------------------------------- */
 
-.landing-hero .badge-demo {
-  align-self: center;
-}
+
 
 .landing {
   min-height: 100vh;
@@ -2597,90 +2544,7 @@ mark.cite .cite-note {
   }
 }
 
-/* ==================================================================
-   Demo Workspace Notice Banner
-   ================================================================== */
 
-.demo-workspace-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: linear-gradient(135deg, rgba(238, 248, 237, 0.95) 0%, rgba(246, 250, 240, 0.85) 100%);
-  border: 1px solid rgba(48, 102, 69, 0.2);
-  border-radius: var(--radius);
-  padding: 13px 18px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 8px rgba(48, 102, 69, 0.04);
-}
-
-.demo-banner-content {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.demo-banner-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--lime-tint);
-  border: 1px solid #c8e29a;
-  color: #265538;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.demo-banner-text {
-  min-width: 0;
-}
-
-.demo-banner-tag {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #245236;
-  margin-right: 8px;
-}
-
-.demo-banner-desc {
-  display: inline;
-  font-size: 13px;
-  color: #2d553e;
-  line-height: 1.45;
-  margin: 0;
-}
-
-.demo-banner-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.demo-banner-dismiss {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  background: transparent;
-  color: #4b745c;
-  cursor: pointer;
-  border-radius: 6px;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.demo-banner-dismiss:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: var(--ink);
-}
 
 /* ==================================================================
    Business-Value Dashboard: Story Card & Metrics

@@ -1,48 +1,21 @@
 /**
  * Customer chat: conversation session management, staged human handoff,
- * order-lookup tool display, ratings and demo starters.
+ * order-lookup tool display, and ratings.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle, Bot, CheckCircle2, Send,
-  Sparkles, Star, UserRound, Users, Wrench,
+  Star, UserRound, Users, Wrench,
 } from 'lucide-react';
-
 import { ApiError, api, customerApi, loadCustomerStore, saveCustomerStore } from '../service-api';
-import type { Conversation, CustomerStore, Faq, Health, Message } from '../service-types';
+import type { Conversation, CustomerStore, Faq, Message } from '../service-types';
 import {
   CitedAnswer, EmptyState, INTENT_LABEL, LogoMark, Modal, Spinner, MessageBubble, lastCustomerQueryRef, errorMessage,
   formatDateTime,
 } from '../ui/shared';
 
-interface DemoStarter {
-  label: string;
-  text: string;
-  kind: 'order' | 'other';
-  orderId?: string;
-}
 
-/** One-click demo questions, ordered to demonstrate Relay's core loop in 1-2-3 sequence. */
-const DEMO_STARTERS: DemoStarter[] = [
-  {
-    label: '1. Order + refund',
-    text: "My order hasn't arrived and I want a refund.",
-    kind: 'other',
-  },
-  {
-    label: '2. Policy edge case',
-    text: 'I received the wrong product. Can you issue the refund now?',
-    kind: 'other',
-  },
-  {
-    label: '3. Order lookup #4471',
-    text: "Where's my order #4471? It was supposed to arrive today.",
-    kind: 'order',
-    orderId: '4471',
-  },
-  { label: '4. Talk to a human', text: 'I want to talk to a human agent', kind: 'other' },
-];
 
 function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void }) {
   const [store, setStore] = useState<CustomerStore>(() => loadCustomerStore());
@@ -50,10 +23,9 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [faqs, setFaqs] = useState<Faq[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState<null | 'send' | 'escalate'>(null);
-  /** Staged reply phases so the demo can show the tool call before the answer. */
+  /** Staged reply phases to show tool calls before answers. */
   const [phase, setPhase] = useState<null | 'tool' | 'answering' | 'escalating'>(null);
   /** Transient banner after an order-lookup tool call. */
   const [toolFlash, setToolFlash] = useState<{ orderId: string; at: number } | null>(null);
@@ -85,13 +57,12 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
     (async () => {
       setLoading(true);
       try {
-        const [loadedFaqs, loadedHealth] = await Promise.all([
+        const [loadedFaqs] = await Promise.all([
           api.listFaqs(),
           api.health().catch(() => null),
         ]);
         if (cancelled) return;
         setFaqs(loadedFaqs);
-        if (loadedHealth) setHealth(loadedHealth);
 
         const current = storeRef.current;
         if (fresh) {
@@ -209,7 +180,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
 
   const pendingSend = useRef<{ conversationId: string; content: string; clientId: string } | null>(null);
 
-  const send = useCallback(async (raw: string, opts?: { starter?: DemoStarter }) => {
+  const send = useCallback(async (raw: string) => {
     const content = raw.trim();
     if (!content || busy !== null) return;
     setError(null);
@@ -217,12 +188,12 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
     setInput('');
     /** A new conversation may fail (free cap). Only create once per send. */
     let createdThisSend = false;
-    pendingOrderId.current = opts?.starter?.orderId ?? /(\d{3,6})/.exec(content)?.[1] ?? null;
+    pendingOrderId.current = /(\d{3,6})/.exec(content)?.[1] ?? null;
     // Staged tool phase for typed questions too: an order number plus a status
     // word means the lookup tool is about to run.
     const looksLikeOrderLookup = pendingOrderId.current !== null
       && /\b(where|track|status|arrive|delivery|shipping|shipped|late|stuck)\b/i.test(content);
-    setPhase(opts?.starter?.kind === 'order' || looksLikeOrderLookup ? 'tool' : 'answering');
+    setPhase(looksLikeOrderLookup ? 'tool' : 'answering');
 
     let active = conversation;
     let token = tokenFor(active?.id);
@@ -456,39 +427,15 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               <CheckCircle2 size={12} aria-hidden="true" />All systems operational
             </span>
             <span className="badge badge-neutral">
-              {health?.mode === 'live' ? 'Live answers' : 'Demo answers'}
+              Live answers
             </span>
           </div>
 
           <p className="note" style={{ marginTop: 18 }}>
-            {health?.mode === 'live'
-              ? 'Answers come from the CodeBuddy agent and your support knowledge base.'
-              : 'This workspace runs in demo mode: answers are deterministic and come from the sample knowledge base. Try one of the scripted starters above the chat box.'}
+            Answers come from the CodeBuddy agent and your support knowledge base.
           </p>
 
-          <div className="card" style={{ marginTop: 22, border: '1px solid var(--border)' }}>
-            <div className="card-head" style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
-              <div className="row" style={{ gap: 7 }}>
-                <Sparkles size={14} aria-hidden="true" style={{ color: 'var(--brand)' }} />
-                <span style={{ fontSize: 13, fontWeight: 600 }}>The 30-Second Proof</span>
-              </div>
-            </div>
-            <div style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.5, color: 'var(--muted)' }}>
-              <p style={{ margin: '0 0 8px' }}>Test how Relay thinks and acts in 3 clicks:</p>
-              <ol style={{ paddingLeft: 16, margin: 0 }}>
-                <li style={{ marginBottom: 6 }}>
-                  <strong>Verified policy answer:</strong> Click starter #1 &rarr; Relay cites shipping and refund policies with exact links.
-                </li>
-                <li style={{ marginBottom: 6 }}>
-                  <strong>Safe edge-case handling:</strong> Click starter #2 &rarr; Relay avoids hallucinating and offers human escalation.
-                </li>
-                <li>
-                  <strong>Live team handoff:</strong> Click starter #4 &rarr; Switch to the workspace inbox to see full transcript and reply as yourself.
-                </li>
-              </ol>
-            </div>
-          </div>
-        </aside>
+          </aside>
 
         <section className="chat-panel" aria-label="Support chat">
           <div className="chat-head">
@@ -499,7 +446,6 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
                 <div className="card-sub">Knowledge-powered support</div>
               </div>
             </div>
-            <span className="badge badge-demo">{health?.mode === 'live' ? 'Live' : 'Demo'} mode</span>
           </div>
 
           <div className="chat-scroll" ref={scrollRef}>
@@ -573,15 +519,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               </div>
             ) : null}
 
-            {toolFlash ? (
-              <div className="tool-flash" role="status">
-                <Wrench size={14} aria-hidden="true" />
-                <span>
-                  Relay just looked up order <strong>#{toolFlash.orderId}</strong> live — order systems are
-                  normally out of reach for chat, so this is the one connector enabled for the demo.
-                </span>
-              </div>
-            ) : null}
+
 
             {resolved ? (
               <div className="resolved-note">
@@ -614,24 +552,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
                   </p>
                 ) : null}
 
-                <div className="starters" role="group" aria-label="Demo starter questions">
-                  {DEMO_STARTERS.map((starter) => (
-                    <button
-                      key={starter.label}
-                      type="button"
-                      className="starter"
-                      disabled={busy !== null}
-                      onClick={() => {
-                        setInput(starter.text);
-                        inputRef.current?.focus();
-                      }}
-                    >
-                      <Sparkles size={13} aria-hidden="true" />
-                      {starter.label}
-                      <span className={`starter-kbd${starter.kind === 'order' ? ' order' : ''}`}>Try this →</span>
-                    </button>
-                  ))}
-                </div>
+
 
                 <div className="composer">
                   <textarea

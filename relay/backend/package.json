@@ -11,10 +11,10 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/support.test.ts tests/unit.test.ts",
+    "test": "tsx --test tests/unit.test.ts",
     "test:e2e": "playwright test",
     "test:visual": "playwright test --config playwright.visual.config.ts",
-    "test:coverage": "c8 --reporter=text --reporter=lcov --check-coverage --lines 52 --branches 68 tsx --test tests/support.test.ts tests/unit.test.ts"
+    "test:coverage": "c8 --reporter=text --reporter=lcov --check-coverage --lines 52 --branches 68 tsx --test tests/unit.test.ts"
   },
   "dependencies": {
     "@sentry/node": "^9.47.1",

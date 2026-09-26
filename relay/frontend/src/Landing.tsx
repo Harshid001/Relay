@@ -44,7 +44,7 @@ const FEATURES: Array<{ icon: React.ReactNode; title: string; text: string }> = 
   {
     icon: <PackageSearch size={18} aria-hidden="true" />,
     title: 'Order lookups, not chatbot filler',
-    text: 'Point Relay at your order system and it answers with live status, carrier and tracking data. (This demo queries a sample catalogue.)',
+    text: 'Point Relay at your order system and it answers with live status, carrier and tracking data.',
   },
   {
     icon: <BarChart3 size={18} aria-hidden="true" />,
@@ -91,7 +91,7 @@ export default function Landing({
             Agent sign-in
           </button>
           <button type="button" className="btn btn-primary" onClick={onOpenChat}>
-            Try the demo
+            Get started
             <ArrowRight size={15} aria-hidden="true" />
           </button>
         </nav>
@@ -99,7 +99,7 @@ export default function Landing({
 
       <main>
         <section className="landing-hero">
-          <span className="badge badge-demo">Built for small e-commerce &amp; SaaS support teams</span>
+          
           <h1>
             AI handles the repetitive.
             <br />
@@ -277,7 +277,7 @@ export default function Landing({
           </p>
           <div className="landing-cta">
             <button type="button" className="btn btn-primary btn-lg" onClick={onOpenChat}>
-              Start the demo
+              Get started
               <ArrowRight size={17} aria-hidden="true" />
             </button>
             <span className="note"><Clock size={13} aria-hidden="true" /> 60 seconds is enough</span>
@@ -291,8 +291,7 @@ export default function Landing({
           <span className="brand-word">relay</span>
         </div>
         <span className="note">
-          AI handles the repetitive. Humans handle the important. · Free plan · self-hostable ·
-          demo data included.
+          AI handles the repetitive. Humans handle the important. · Free plan · self-hostable.
         </span>
       </footer>
     </div>

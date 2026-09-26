@@ -37,16 +37,16 @@ test.afterAll(async () => {
 });
 
 async function dismissOverlays(): Promise<void> {
-  for (const label of ['Dismiss setup guide', 'Dismiss demo banner', 'Dismiss message']) {
+  for (const label of ['Dismiss setup guide', 'Dismiss message']) {
     const button = page.getByRole('button', { name: label });
     if (await button.isVisible().catch(() => false)) {
-      await button.click();
+      await button.click({ force: true });
     }
   }
 }
 
 test.describe.serial('pilot flow', () => {
-  test('landing renders and the demo CTA opens the chat', async () => {
+  test('landing renders and the CTA opens the chat', async () => {
     await page.goto(`${base}/`);
     await expect(page.getByRole('heading', { name: /AI handles the repetitive/ })).toBeVisible();
     await page.getByRole('button', { name: /Launch AI support for free/ }).click();

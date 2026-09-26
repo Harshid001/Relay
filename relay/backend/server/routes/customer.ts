@@ -6,14 +6,13 @@
 import type { RequestHandler, Router } from 'express';
 
 import {
-  generateDemoTurn,
+
   generateLiveTurn,
   handoffMessage,
   type AgentTurnResult,
   type ToolEvent,
   type TurnHistoryItem,
 } from '../agent.js';
-import { LIVE } from '../config.js';
 import * as store from '../db.js';
 import { emitConversation } from '../events.js';
 import { wrap } from '../http.js';
@@ -256,7 +255,6 @@ export function registerCustomerRoutes(router: Router): void {
         let turn: AgentTurnResult;
         const aiStart = process.hrtime.bigint();
         try {
-          if (LIVE) {
             turn = await generateLiveTurn({
               conversationId,
               customer: existing.customer,
@@ -265,13 +263,6 @@ export function registerCustomerRoutes(router: Router): void {
               faqs: await store.listFaqs(),
               previousIntent,
             });
-          } else {
-            turn = generateDemoTurn({
-              userText: content,
-              faqs: await store.listFaqs(),
-              previousIntent,
-            });
-          }
           const aiDurationMs = Number(process.hrtime.bigint() - aiStart) / 1e6;
           telemetry.recordAiTurn(true, aiDurationMs);
           telemetry.recordKbSearch(turn.sources.length > 0);
@@ -328,12 +319,10 @@ export function registerCustomerRoutes(router: Router): void {
         const reportedUnresolved = /\b(still (?:not|does(?:n['’]?t| not)|is(?:n['’]?t| not)|can(?:not|'t))|(?:did(?:n['’]?t| not)|does(?:n['’]?t| not)) (?:work|help|fix)|not (?:working|helpful|resolved|fixed)|same (?:problem|issue|error)|tried (?:that|this|everything)|no (?:luck|change))\b/i.test(content);
         // A successful order lookup is a resolved turn by construction.
         const orderLookupResolved = Boolean(turn.toolCall);
-        // In demo mode a missing citation means the knowledge base had no answer.
-        // In live mode `sources` is only the retrieval context handed to the model,
+        // `sources` is only the retrieval context handed to the model,
         // so it says nothing about whether the model actually resolved the request;
         // there we rely on the customer's own words and the model's escalate flag.
-        const unresolvedSignal = !orderLookupResolved
-          && (reportedUnresolved || (!LIVE && turn.sources.length === 0));
+        const unresolvedSignal = !orderLookupResolved && reportedUnresolved;
         const unresolvedStreak = unresolvedSignal ? previousUnresolvedStreak + 1 : 0;
 
         let escalate = turn.escalate;

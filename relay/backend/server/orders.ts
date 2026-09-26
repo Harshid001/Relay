@@ -1,11 +1,11 @@
 /**
- * Relay Store demo order catalogue.
+ * Relay Store mock order catalogue.
  *
  * A tiny, purely in-memory stand-in for a real order system so the assistant
  * can demonstrate one tool call ("look up an order by number") with stable,
  * personalized data. Nothing here touches the network or the database, and no
  * real customer data exists: every order, carrier and tracking number below is
- * fictional and deterministic.
+ * fictional.
  */
 
 export interface MockOrder {
@@ -18,53 +18,7 @@ export interface MockOrder {
   items: string;
 }
 
-export const MOCK_ORDERS: MockOrder[] = [
-  {
-    orderId: '4471',
-    status: 'out_for_delivery',
-    carrier: 'SwiftShip',
-    trackingNumber: 'SS-9204-4471',
-    eta: 'today before 8 pm',
-    lastUpdate: 'was loaded onto the delivery van this morning',
-    items: 'Aurora wireless headphones',
-  },
-  {
-    orderId: '4472',
-    status: 'in_transit',
-    carrier: 'SwiftShip',
-    trackingNumber: 'SS-9204-4472',
-    eta: 'Thursday',
-    lastUpdate: 'left the regional depot yesterday',
-    items: 'Trailhead 40L backpack',
-  },
-  {
-    orderId: '4503',
-    status: 'in_transit',
-    carrier: 'MetroPost',
-    trackingNumber: 'MP-7712-4503',
-    eta: 'Wednesday',
-    lastUpdate: 'is moving between hubs overnight',
-    items: 'Fjord desk lamp',
-  },
-  {
-    orderId: '4290',
-    status: 'processing',
-    carrier: '',
-    trackingNumber: '',
-    eta: 'the next business day',
-    lastUpdate: 'is being packed at the warehouse right now',
-    items: 'Solaris power bank',
-  },
-  {
-    orderId: '4183',
-    status: 'delivered',
-    carrier: 'MetroPost',
-    trackingNumber: 'MP-7712-4183',
-    eta: '',
-    lastUpdate: 'was handed over on Friday at 2:40 pm',
-    items: 'Nimbus smartwatch',
-  },
-];
+export const MOCK_ORDERS: MockOrder[] = [];
 
 export function findOrderById(orderId: string): MockOrder | undefined {
   return MOCK_ORDERS.find((order) => order.orderId === orderId);
@@ -77,7 +31,7 @@ export function extractOrderNumber(text: string): string | null {
   return match[1] ?? match[2] ?? null;
 }
 
-/** One-sentence live status, used to enrich both demo and live replies. */
+/** One-sentence live status, used to enrich live replies. */
 export function orderStatusSentence(order: MockOrder): string {
   switch (order.status) {
     case 'processing':
@@ -91,7 +45,7 @@ export function orderStatusSentence(order: MockOrder): string {
   }
 }
 
-/** Full customer-facing reply for the deterministic demo agent. */
+/** Full customer-facing reply. */
 export function orderLookupReply(order: MockOrder): string {
   const intro: Record<MockOrder['status'], string> = {
     processing: `Good news — I found your order. Order ${order.orderId} (${order.items}) ${order.lastUpdate}.`,

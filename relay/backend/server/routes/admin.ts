@@ -317,11 +317,4 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps): void {
     }
     res.json({ ok: true });
   }));
-
-  router.post('/admin/onboarding/sample-knowledge', writeLimiter, deps.requireAdminRole, wrap(async (_req, res) => {
-    const faqs = await store.seedSampleKnowledge();
-    clearFaqTermCache();
-    publish({ type: 'faq' });
-    res.json({ items: faqs });
-  }));
 }
