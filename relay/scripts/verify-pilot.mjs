@@ -58,9 +58,11 @@ async function run() {
     report('2. System Observability (/api/health/system)', false, err.message);
   }
 
-  // Step 3: Remote Admin Security Guard (Must 401)
+  // Step 3: Remote Admin Security Guard (Must 401 on remote / untrusted IP)
   try {
-    const res = await fetch(`${targetUrl}/api/admin/conversations`);
+    const res = await fetch(`${targetUrl}/api/admin/conversations`, {
+      headers: { 'x-forwarded-for': '203.0.113.195' },
+    });
     report('3. Remote Admin Guard (Unauthenticated 401)', res.status === 401, `status=${res.status}`);
   } catch (err) {
     report('3. Remote Admin Guard', false, err.message);
