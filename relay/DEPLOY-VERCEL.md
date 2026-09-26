@@ -33,8 +33,9 @@ and `vercel.json` routes `/api/*` to it while serving the Vite build from
 ## 2 · Vercel
 
 1. Push the repo to GitHub, then [vercel.com/new](https://vercel.com/new) →
-   Import. Framework preset **Vite** is auto-detected; `vercel.json` supplies
-   the rest (`npm run build`, output `dist/`, API routing).
+   Import `Harshid001/Relay`.
+   - **Root Directory**: Click "Edit" and select `relay`.
+   - Framework preset **Vite** is auto-detected; `vercel.json` supplies the rest (`npm run build`, output `dist/`, API routing).
 2. Environment variables (Project → Settings → Environment Variables):
 
    | Variable | Value |
