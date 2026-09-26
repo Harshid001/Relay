@@ -32,7 +32,7 @@ const DEMO_STARTERS: DemoStarter[] = [
     kind: 'other',
   },
   {
-    label: '2. Unanswerable test',
+    label: '2. Policy edge case',
     text: 'I received the wrong product. Can you issue the refund now?',
     kind: 'other',
   },
@@ -475,16 +475,16 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               </div>
             </div>
             <div style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.5, color: 'var(--muted)' }}>
-              <p style={{ margin: '0 0 8px' }}>Watch the core Relay loop in 3 clicks:</p>
+              <p style={{ margin: '0 0 8px' }}>Test how Relay thinks and acts in 3 clicks:</p>
               <ol style={{ paddingLeft: 16, margin: 0 }}>
                 <li style={{ marginBottom: 6 }}>
-                  <strong>Policy answer:</strong> Click starter #1 &rarr; Relay cites shipping and refund policies.
+                  <strong>Verified policy answer:</strong> Click starter #1 &rarr; Relay cites shipping and refund policies with exact links.
                 </li>
                 <li style={{ marginBottom: 6 }}>
-                  <strong>Knowledge gap:</strong> Click starter #2 &rarr; Relay refuses to fabricate citations and offers human handoff.
+                  <strong>Safe edge-case handling:</strong> Click starter #2 &rarr; Relay avoids hallucinating and offers human escalation.
                 </li>
                 <li>
-                  <strong>Human inbox:</strong> Click &ldquo;Request a human&rdquo; &rarr; Head back to the workspace to see full context, cited policies, and resolve the thread.
+                  <strong>Live team handoff:</strong> Click starter #4 &rarr; Switch to the workspace inbox to see full transcript and reply as yourself.
                 </li>
               </ol>
             </div>

@@ -14,19 +14,35 @@ Two ways to run it, both free:
 | Human handoffs | Unlimited, never metered | Unlimited |
 | Data | Your deployment's database | Entirely yours |
 
-## Run
+## Structure & Running
 
-Requires Node.js 22.13+ and a MongoDB server (8.x recommended). From this project folder:
+The project is structured into two dedicated directories:
+- **`frontend/`**: React client powered by Vite, Tailwind/PostCSS, and Lucide icons.
+- **`backend/`**: Express server, MongoDB store, AI Agent SDK, and automated test suite.
 
+### Frontend
 ```sh
+cd frontend
 npm install
-npm run build
-npm start
+npm run dev    # Starts Vite dev server on http://127.0.0.1:5173
+npm run build  # Compiles client into frontend/dist
 ```
 
-The server connects to `MONGODB_URI` (default `mongodb://127.0.0.1:27017`), seeds the knowledge base and demo conversations on first run, then listens.
+### Backend
+```sh
+cd backend
+npm install
+npm run dev    # Starts API server on http://127.0.0.1:3000 with tsx watch
+npm run test   # Runs 33 automated tests
+```
 
-Open **http://127.0.0.1:3000**. Customer chat: **http://127.0.0.1:3000/?view=chat**.
+From the root `relay/` folder:
+```sh
+npm run dev:frontend    # Starts frontend dev server
+npm run dev:backend     # Starts backend dev server
+npm run build:frontend  # Builds frontend bundle
+npm run test:backend    # Runs backend tests
+```
 
 ### The free plan
 

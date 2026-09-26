@@ -23,7 +23,7 @@ import {
   ADMIN_NAME, Avatar, BusinessStoryCard, CitedAnswer, EmptyState, INTENTS, INTENT_LABEL, IntentBars, IntentPill,
   lastCustomerQueryRef, LogoMark, Modal, PROVIDER_LABEL, Spinner, STATUS_LABEL, StatCard, statCards,
   StatusPill, VolumeChart, MessageBubble, currentGreeting, errorMessage, initials,
-  formatDateTime, formatSeconds, smoothPath, timeAgo, todayLabel,
+  formatDateTime, formatSeconds, smoothPath, timeAgo, todayLabel, getFriendlyName,
 } from '../ui/shared';
 
 /* ================================================================== *
@@ -144,7 +144,51 @@ export function SupportWidget() {
 }
 
 /* ================================================================== *
- * Onboarding Card (First 5 Minutes)
+ * Demo Workspace Notice Banner
+ * ================================================================== */
+
+function DemoBanner({ onPreviewChat, onOpenKb }: { onPreviewChat: () => void; onOpenKb: () => void }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+
+  return (
+    <aside className="demo-workspace-banner" aria-label="Demo workspace information">
+      <div className="demo-banner-content">
+        <span className="demo-banner-icon">
+          <Sparkles size={16} aria-hidden="true" />
+        </span>
+        <div className="demo-banner-text">
+          <span className="demo-banner-tag">Interactive Demo Mode</span>
+          <p className="demo-banner-desc">
+            You're exploring Relay with preloaded store policies and simulated conversations. Test AI answers in customer preview, edit policies, or connect your live store when ready.
+          </p>
+        </div>
+      </div>
+      <div className="demo-banner-actions">
+        <button type="button" className="btn btn-outline btn-xs" onClick={onPreviewChat}>
+          <MessageSquare size={13} aria-hidden="true" />
+          Test in customer chat
+        </button>
+        <button type="button" className="btn btn-ghost btn-xs" onClick={onOpenKb}>
+          <BookOpen size={13} aria-hidden="true" />
+          Review policies
+        </button>
+        <button
+          type="button"
+          className="demo-banner-dismiss"
+          onClick={() => setDismissed(true)}
+          title="Dismiss banner"
+          aria-label="Dismiss demo banner"
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+/* ================================================================== *
+ * Onboarding Card (Quick Setup Guide)
  * ================================================================== */
 
 interface OnboardingCardProps {
@@ -192,46 +236,75 @@ function OnboardingCard({
           style={{ gap: 5, color: 'var(--ink-muted)' }}
         >
           <HelpCircle size={13} aria-hidden="true" />
-          Show "First 5 minutes" onboarding checklist
+          Show Quick Setup Guide (4 steps)
         </button>
       </div>
     );
   }
 
+  const step1Done = faqCount > 0;
+  const completedSteps = step1Done ? 1 : 0;
+  const progressPct = Math.round((completedSteps / 4) * 100);
+
   return (
-    <section className="onboarding-card" aria-label="First 5 minutes onboarding checklist">
+    <section className="onboarding-card" aria-label="Quick setup guide">
       <div className="onboarding-head">
-        <div>
-          <div className="onboarding-title">Welcome to Relay · First 5 minutes setup</div>
-          <div className="onboarding-sub">
-            Follow this 4-step loop to turn your customer support from chaotic to trustworthy.
+        <div className="onboarding-head-left">
+          <div className="onboarding-title-badge">
+            <Sparkles size={13} aria-hidden="true" />
+            <span>First 5-Minute Onboarding</span>
           </div>
+          <h2 className="onboarding-title">Get your AI support ready in 4 easy steps</h2>
+          <p className="onboarding-sub">
+            Teach your AI store policies, test verified responses in the sandbox, and connect live chat to your customers.
+          </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs"
-          onClick={dismiss}
-          aria-label="Dismiss onboarding checklist"
-        >
-          <X size={14} aria-hidden="true" />
-          <span>Dismiss</span>
-        </button>
+
+        <div className="onboarding-head-right">
+          <div className="onboarding-progress-pill" title={`${completedSteps} of 4 steps ready`}>
+            <div className="progress-info">
+              <span className="progress-label">Setup progress</span>
+              <span className="progress-count">{completedSteps} / 4 ready</span>
+            </div>
+            <div className="mini-progress-track">
+              <div
+                className="mini-progress-fill"
+                style={{ width: `${Math.max(25, progressPct)}%` }}
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs dismiss-btn"
+            onClick={dismiss}
+            title="Dismiss setup guide"
+            aria-label="Dismiss setup guide"
+          >
+            <X size={14} aria-hidden="true" />
+            <span>Dismiss</span>
+          </button>
+        </div>
       </div>
 
       <div className="onboarding-steps">
-        <div className="onboarding-step">
-          <div className="step-num">1</div>
-          <div className="step-body">
-            <div className="step-title">
-              Add your knowledge
-              {faqCount > 0 ? (
-                <span className="badge badge-ok" style={{ marginLeft: 8 }}>
-                  <Check size={11} aria-hidden="true" /> {faqCount} active
-                </span>
-              ) : null}
+        {/* Step 1 */}
+        <div className={`onboarding-step${step1Done ? ' done' : ''}`}>
+          <div className="step-header">
+            <div className={`step-badge${step1Done ? ' complete' : ''}`}>
+              {step1Done ? <Check size={14} aria-hidden="true" /> : '1'}
             </div>
+            {step1Done ? (
+              <span className="badge badge-ok">
+                <Check size={10} aria-hidden="true" /> {faqCount} active policies
+              </span>
+            ) : (
+              <span className="badge badge-warn">Action required</span>
+            )}
+          </div>
+          <div className="step-body">
+            <div className="step-title">1. Add store policies</div>
             <div className="step-sub">
-              Upload policies or load standard Acme Store defaults (Shipping, Returns, Refunds, Tracking, Account, Support).
+              Upload policies or load standard e-commerce defaults (Shipping, Returns, Refunds, Tracking, Support).
             </div>
             <div className="step-actions">
               <button
@@ -241,7 +314,7 @@ function OnboardingCard({
                 disabled={seedingSample}
               >
                 {seedingSample ? <Spinner size={12} /> : <Sparkles size={12} aria-hidden="true" />}
-                Use sample policies
+                {step1Done ? 'Reload sample policies' : 'Use sample policies'}
               </button>
               <button
                 type="button"
@@ -255,12 +328,16 @@ function OnboardingCard({
           </div>
         </div>
 
+        {/* Step 2 */}
         <div className="onboarding-step">
-          <div className="step-num">2</div>
+          <div className="step-header">
+            <div className="step-badge">2</div>
+            <span className="badge badge-neutral">Interactive</span>
+          </div>
           <div className="step-body">
-            <div className="step-title">Test your AI</div>
+            <div className="step-title">2. Test your AI in chat</div>
             <div className="step-sub">
-              Ask multi-policy questions, verify cited sources, and trigger a handoff when confidence is low.
+              Ask tricky customer questions, verify cited sources, and watch how it triggers a human handoff when unsure.
             </div>
             <div className="step-actions">
               <button
@@ -269,18 +346,22 @@ function OnboardingCard({
                 onClick={onPreview}
               >
                 <MessageSquare size={12} aria-hidden="true" />
-                Open customer chat
+                Test customer chat ↗
               </button>
             </div>
           </div>
         </div>
 
+        {/* Step 3 */}
         <div className="onboarding-step">
-          <div className="step-num">3</div>
+          <div className="step-header">
+            <div className="step-badge">3</div>
+            <span className="badge badge-neutral">1-line snippet</span>
+          </div>
           <div className="step-body">
-            <div className="step-title">Connect your support</div>
+            <div className="step-title">3. Connect storefront</div>
             <div className="step-sub">
-              Install the lightweight chat launcher on your storefront or web app with a single tag.
+              Install the lightweight chat bubble on Shopify, WooCommerce, or any custom storefront with a single script tag.
             </div>
             <div className="step-actions">
               <button
@@ -289,18 +370,22 @@ function OnboardingCard({
                 onClick={onInstallWidget}
               >
                 <Code size={12} aria-hidden="true" />
-                Install widget
+                Get embed code
               </button>
             </div>
           </div>
         </div>
 
+        {/* Step 4 */}
         <div className="onboarding-step">
-          <div className="step-num">4</div>
+          <div className="step-header">
+            <div className="step-badge">4</div>
+            <span className="badge badge-neutral">Autonomous & safe</span>
+          </div>
           <div className="step-body">
-            <div className="step-title">You're live</div>
+            <div className="step-title">4. Go live & monitor</div>
             <div className="step-sub">
-              Confident answers are handled automatically. Every escalation flows directly to your human inbox.
+              Confident answers are handled automatically. Every customer escalation flows directly to your human inbox.
             </div>
             <div className="step-actions">
               <button
@@ -309,7 +394,7 @@ function OnboardingCard({
                 onClick={onViewInbox}
               >
                 <Inbox size={12} aria-hidden="true" />
-                View live inbox
+                View live inbox →
               </button>
             </div>
           </div>
@@ -320,6 +405,7 @@ function OnboardingCard({
 }
 
 interface OverviewProps {
+  session: SessionUser | null;
   stats: Stats | null;
   statsLoading: boolean;
   conversations: Conversation[];
@@ -339,10 +425,11 @@ interface OverviewProps {
 }
 
 function OverviewPage({
-  stats, statsLoading, conversations, loading, days, onDays, onOpen, onViewAll, onOpenKb,
+  session, stats, statsLoading, conversations, loading, days, onDays, onOpen, onViewAll, onOpenKb,
   onPreview, onNewConversation, onInstallWidget, onSeedSample, seedingSample, faqCount, mode,
 }: OverviewProps) {
   const [query, setQuery] = useState('');
+  const userName = getFriendlyName(session, 'there');
 
   const recent = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -369,8 +456,8 @@ function OverviewPage({
             </span>
             <span className="date-chip">{todayLabel()}</span>
           </div>
-          <h1 className="page-title">{currentGreeting()}, Alex</h1>
-          <p className="page-sub">Here’s how your support is doing today.</p>
+          <h1 className="page-title">{currentGreeting()}, {userName} 👋</h1>
+          <p className="page-sub">Here’s how your store support and AI resolutions are performing today.</p>
         </div>
         <div className="head-actions">
           <div className="segmented" role="group" aria-label="Date window">
@@ -733,6 +820,7 @@ function ConversationsPage({ conversations, loading, onOpen, newWaitingIds, onOp
 
 interface DrawerProps {
   id: string;
+  session: SessionUser | null;
   faqs: Faq[];
   onClose: () => void;
   onUpdated: (conversation: Conversation) => void;
@@ -741,7 +829,7 @@ interface DrawerProps {
   mode: 'demo' | 'live';
 }
 
-function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onError, mode }: DrawerProps) {
+function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSource, onError, mode }: DrawerProps) {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [reply, setReply] = useState('');
@@ -857,11 +945,17 @@ function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onErro
     }
   };
 
+  const currentAgentName = session ? getFriendlyName(session) : 'Support Agent';
+  const isAssignedToMe = Boolean(
+    conversation &&
+    (conversation.assignee === currentAgentName || (session?.name && conversation.assignee === session.name))
+  );
+
   const doAssign = async () => {
     if (busy) return;
     setBusy('assign');
     try {
-      const updated = await api.assign(id, ADMIN_NAME);
+      const updated = await api.assign(id, currentAgentName);
       onUpdated(updated);
       setDetail((prev) => (prev ? { ...prev, conversation: updated } : prev));
     } catch (error) {
@@ -963,10 +1057,14 @@ function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onErro
                   <button
                     className="btn btn-outline btn-sm"
                     onClick={doAssign}
-                    disabled={busy !== null || conversation.assignee === ADMIN_NAME}
+                    disabled={busy !== null || isAssignedToMe}
                   >
                     {busy === 'assign' ? <Spinner size={14} /> : <UserRound size={14} aria-hidden="true" />}
-                    {conversation.assignee === ADMIN_NAME ? `Assigned to ${ADMIN_NAME}` : 'Assign to me'}
+                    {isAssignedToMe
+                      ? '✓ Assigned to you'
+                      : conversation.assignee
+                        ? `Assigned to ${conversation.assignee}`
+                        : 'Assign to me'}
                   </button>
                   <button
                     className="btn btn-primary btn-sm"
@@ -1025,7 +1123,7 @@ function ConversationDrawer({ id, faqs, onClose, onUpdated, onOpenSource, onErro
               }}
             />
             <div className="composer-foot">
-              <span className="hint">Sent as {ADMIN_NAME}. Ctrl + Enter to send.</span>
+              <span className="hint">Replying as {currentAgentName} · Press Ctrl + Enter to send</span>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={doReply}
@@ -2106,6 +2204,16 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
   /** Previous badge counts, used to trigger a pop animation on increase. */
   const lastBadgeRef = useRef<Record<string, number>>({ waiting: 0 });
 
+  useEffect(() => {
+    if (!toast) return;
+    if (toast.kind === 'info') {
+      const timer = window.setTimeout(() => {
+        setToast(null);
+      }, 4500);
+      return () => window.clearTimeout(timer);
+    }
+  }, [toast]);
+
   const handleError = useCallback((error: unknown, retry?: () => void) => {
     if (error instanceof AuthError) {
       setAuthNeeded(true);
@@ -2431,10 +2539,10 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
             <AccountCard user={session} onSignOut={onSignOut} />
           ) : (
             <>
-              <span className="agent-avatar" aria-hidden="true">AM</span>
+              <span className="agent-avatar" aria-hidden="true">WA</span>
               <div className="workspace-meta">
-                <div className="agent-name">Alex Morgan</div>
-                <div className="agent-role">Workspace admin</div>
+                <div className="agent-name">Workspace Admin</div>
+                <div className="agent-role">Active Session</div>
               </div>
             </>
           )}
@@ -2443,16 +2551,15 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
 
       <main className="main">
         {mode === 'demo' ? (
-          <div className="row row-wrap" style={{ marginBottom: 18 }}>
-            <span className="badge badge-demo">Demo workspace · Sample data</span>
-            <span className="note">
-              Seeded conversations and a sample knowledge base — not live customer performance.
-            </span>
-          </div>
+          <DemoBanner
+            onPreviewChat={onPreviewChat}
+            onOpenKb={openKnowledge}
+          />
         ) : null}
 
         {page === 'overview' ? (
           <OverviewPage
+            session={session}
             stats={stats}
             statsLoading={statsLoading}
             conversations={conversations}
@@ -2510,6 +2617,7 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
       {openId ? (
         <ConversationDrawer
           id={openId}
+          session={session}
           faqs={faqs}
           mode={mode}
           onClose={closeDrawer}
@@ -2590,7 +2698,13 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
       {toast ? (
         <div className="toast-wrap">
           <div className={`toast${toast.kind === 'info' ? ' toast-info' : ''}`} role="alert">
-            <AlertCircle size={16} aria-hidden="true" />
+            <span className="toast-icon">
+              {toast.kind === 'info' ? (
+                <CheckCircle2 size={16} aria-hidden="true" />
+              ) : (
+                <AlertCircle size={16} aria-hidden="true" />
+              )}
+            </span>
             <span className="toast-text">{toast.text}</span>
             {toast.retry ? (
               <button

@@ -1184,7 +1184,9 @@ app.use(['/api', '/api/v1'], apiLimiter, (_req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-const DIST_DIR = path.join(store.PROJECT_ROOT, 'dist');
+const DIST_DIR = fs.existsSync(path.join(store.PROJECT_ROOT, 'dist'))
+  ? path.join(store.PROJECT_ROOT, 'dist')
+  : path.resolve(store.PROJECT_ROOT, '../frontend/dist');
 const INDEX_FILE = path.join(DIST_DIR, 'index.html');
 
 if (fs.existsSync(DIST_DIR)) {

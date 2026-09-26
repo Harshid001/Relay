@@ -1,32 +1,32 @@
 # Relay production container.
 # Build:  docker build -t relay .
-# Run:    docker run -p 3000:3000 --env-file .env relay
+# Run:    docker run -p 3000:3000 --env-file backend/.env relay
 #         (point MONGODB_URI at Atlas or a mongo container)
 
 FROM node:22-alpine AS base
 WORKDIR /app
 ENV NODE_ENV=production
 
-# --- Dependencies ------------------------------------------------------
-FROM base AS deps
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-# --- Build (needs devDependencies) -------------------------------------
-FROM base AS build
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js index.html ./
-COPY src ./src
-COPY server ./server
+# --- Frontend Build ----------------------------------------------------
+FROM node:22-alpine AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package.json ./
+RUN npm install
+COPY frontend ./
 RUN npm run build
+
+# --- Backend Dependencies ----------------------------------------------
+FROM base AS backend-deps
+WORKDIR /app/backend
+COPY backend/package.json ./
+RUN npm install --omit=dev
 
 # --- Runtime ------------------------------------------------------------
 FROM base AS runtime
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY server ./server
-COPY package.json ./
+WORKDIR /app/backend
+COPY --from=backend-deps /app/backend/node_modules ./node_modules
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
+COPY backend ./
 # Non-root user
 USER node
 EXPOSE 3000
