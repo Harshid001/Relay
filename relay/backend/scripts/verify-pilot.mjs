@@ -38,7 +38,11 @@ async function run() {
   try {
     const res = await fetch(`${targetUrl}/api/health`);
     const data = await res.json();
-    report('1. Base Health (/api/health)', res.status === 200 && data.status === 'ok', `status=${data.status}, db=${data.checks?.database}`);
+    report(
+      '1. Base Health (/api/health)',
+      res.status === 200 && data.status === 'ok',
+      `status=${data.status}, db=${data.checks?.database}`,
+    );
   } catch (err) {
     report('1. Base Health (/api/health)', false, err.message);
   }
@@ -80,7 +84,11 @@ async function run() {
     const data = await res.json();
     conversationId = data.conversation?.id;
     ownerToken = data.accessToken;
-    report('4. Create Customer Conversation', res.status === 201 && Boolean(conversationId && ownerToken), `id=${conversationId}`);
+    report(
+      '4. Create Customer Conversation',
+      res.status === 201 && Boolean(conversationId && ownerToken),
+      `id=${conversationId}`,
+    );
   } catch (err) {
     report('4. Create Customer Conversation', false, err.message);
   }
@@ -105,7 +113,11 @@ async function run() {
     const data = await res.json();
     const assistantReply = data.messages?.find((m) => m.role === 'assistant');
     const hasCitations = assistantReply?.sources && assistantReply.sources.length > 0;
-    report('5. Policy Retrieval & Citation', res.status === 200 && hasCitations, `sources=${assistantReply?.sources?.map((s) => s.title).join(', ')}`);
+    report(
+      '5. Policy Retrieval & Citation',
+      res.status === 200 && hasCitations,
+      `sources=${assistantReply?.sources?.map((s) => s.title).join(', ')}`,
+    );
   } catch (err) {
     report('5. Policy Retrieval & Citation', false, err.message);
   }
@@ -119,8 +131,16 @@ async function run() {
     });
     const data = await res.json();
     const assistantReply = [...(data.messages || [])].reverse().find((m) => m.role === 'assistant');
-    const refusesGuessing = assistantReply && (assistantReply.content.toLowerCase().includes('cannot') || assistantReply.content.toLowerCase().includes('human') || assistantReply.content.toLowerCase().includes('team'));
-    report('6. Safe Refusal (No Hallucinated Action)', res.status === 200 && Boolean(refusesGuessing), 'assistant refused to perform unauthorized refund');
+    const refusesGuessing =
+      assistantReply &&
+      (assistantReply.content.toLowerCase().includes('cannot') ||
+        assistantReply.content.toLowerCase().includes('human') ||
+        assistantReply.content.toLowerCase().includes('team'));
+    report(
+      '6. Safe Refusal (No Hallucinated Action)',
+      res.status === 200 && Boolean(refusesGuessing),
+      'assistant refused to perform unauthorized refund',
+    );
   } catch (err) {
     report('6. Safe Refusal', false, err.message);
   }
@@ -133,7 +153,11 @@ async function run() {
       body: JSON.stringify({ reason: 'Customer requested human support in smoke test' }),
     });
     const data = await res.json();
-    report('7. Human Handoff Escalation', res.status === 200 && data.status === 'waiting', `status=${data.status}`);
+    report(
+      '7. Human Handoff Escalation',
+      res.status === 200 && data.status === 'waiting',
+      `status=${data.status}`,
+    );
   } catch (err) {
     report('7. Human Handoff Escalation', false, err.message);
   }
@@ -146,7 +170,11 @@ async function run() {
       body: JSON.stringify({ score: 5 }),
     });
     const data = await res.json();
-    report('8. Customer CSAT Rating (Score: 5)', res.status === 200 && data.rating === 5, `rating=${data.rating}`);
+    report(
+      '8. Customer CSAT Rating (Score: 5)',
+      res.status === 200 && data.rating === 5,
+      `rating=${data.rating}`,
+    );
   } catch (err) {
     report('8. Customer CSAT Rating', false, err.message);
   }

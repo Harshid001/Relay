@@ -13,6 +13,12 @@ set -euo pipefail
 ENV_FILE="${ENV_FILE:-/opt/relay/.env.r2}"
 [ -f "$ENV_FILE" ] && set -a && . "$ENV_FILE" && set +a
 
+# Database credentials live in /opt/relay/.env.prod (MONGO_ROOT_USER /
+# MONGO_ROOT_PASSWORD, PRD-007). Sourced here so mongodump can authenticate;
+# without them the dump runs anonymously (pre-auth deployments only).
+PROD_ENV_FILE="${PROD_ENV_FILE:-/opt/relay/.env.prod}"
+[ -f "$PROD_ENV_FILE" ] && set -a && . "$PROD_ENV_FILE" && set +a
+
 : "${R2_ACCESS_KEY_ID:?missing R2_ACCESS_KEY_ID}"
 : "${R2_SECRET_ACCESS_KEY:?missing R2_SECRET_ACCESS_KEY}"
 : "${R2_ENDPOINT:?missing R2_ENDPOINT}"
@@ -22,9 +28,14 @@ STAMP="$(date +%Y-%m-%d_%H%M%S)"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
+AUTH_ARGS=()
+if [ -n "${MONGO_ROOT_USER:-}" ]; then
+  AUTH_ARGS=(--username "$MONGO_ROOT_USER" --password "${MONGO_ROOT_PASSWORD:-}" --authenticationDatabase admin)
+fi
+
 echo "[$(date -Is)] dumping mongo -> $WORKDIR"
 docker compose -f /opt/relay/docker-compose.prod.yml exec -T mongo \
-  mongodump --archive --gzip --db "${MONGODB_DB:-relay}" > "$WORKDIR/dump.archive.gz"
+  mongodump "${AUTH_ARGS[@]}" --archive --gzip --db "${MONGODB_DB:-relay}" > "$WORKDIR/dump.archive.gz"
 
 # Local retention: keep 7 days of dumps on the VM.
 find /opt/relay/backups -name 'relay-*.archive.gz' -mtime +7 -delete 2>/dev/null || true

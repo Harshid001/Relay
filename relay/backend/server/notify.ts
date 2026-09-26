@@ -37,6 +37,8 @@ async function sendViaResend(message: EmailMessage): Promise<boolean> {
         subject: message.subject,
         text: message.text,
       }),
+      // Upstream hangs must not hang the request path (PRD-014).
+      signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
@@ -98,7 +100,11 @@ export async function notifyOnEvent(event: WorkspaceEvent, conversationTitle?: s
 /**
  * Sends a 6-digit verification code and magic link to the user's email.
  */
-export async function sendVerificationEmail(toEmail: string, code: string, magicLink?: string): Promise<boolean> {
+export async function sendVerificationEmail(
+  toEmail: string,
+  code: string,
+  magicLink?: string,
+): Promise<boolean> {
   const subject = `Your Relay verification code: ${code}`;
   const text = [
     `Welcome to Relay!`,
@@ -108,7 +114,9 @@ export async function sendVerificationEmail(toEmail: string, code: string, magic
     `    ${code}`,
     '',
     `This verification code will expire in 10 minutes.`,
-    ...(magicLink ? ['', `Alternatively, you can sign in directly by clicking this magic link:`, magicLink] : []),
+    ...(magicLink
+      ? ['', `Alternatively, you can sign in directly by clicking this magic link:`, magicLink]
+      : []),
     '',
     `If you did not request this email, you can safely ignore it.`,
   ].join('\n');
@@ -118,10 +126,12 @@ export async function sendVerificationEmail(toEmail: string, code: string, magic
     log.info('verification_email_sent', { to: toEmail });
     return true;
   } else {
-    // Development fallback: logged to console so login works without email provider
-    console.log(`[relay auth] Verification code for ${toEmail}: ${code}${magicLink ? ` (Link: ${magicLink})` : ''}`);
-    log.info('verification_email_stub', { to: toEmail, code });
+    // No provider key: the code cannot be delivered. Log delivery metadata
+    // ONLY — never the code or magic link. Secrets in stdout/structured logs
+    // leak single-use credentials to every log shipper (PRD-001). Local
+    // developers can use ALLOW_AUTH_DEBUG_CODE (loopback-only response field)
+    // instead; production must configure RESEND_API_KEY.
+    log.info('verification_email_stub', { to: toEmail });
     return false;
   }
 }
-

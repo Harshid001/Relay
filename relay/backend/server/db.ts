@@ -89,14 +89,14 @@ export async function connectToDatabase(): Promise<Db> {
       const defaultPoolSize = process.env.VERCEL ? 10 : 20;
       const configuredPoolSize = Number(process.env.MONGODB_MAX_POOL_SIZE);
       const maxPoolSize =
-        Number.isFinite(configuredPoolSize) && configuredPoolSize > 0
-          ? configuredPoolSize
-          : defaultPoolSize;
+        Number.isFinite(configuredPoolSize) && configuredPoolSize > 0 ? configuredPoolSize : defaultPoolSize;
 
-      const created = client ?? new MongoClient(MONGODB_URI, {
-        serverSelectionTimeoutMS: 10_000,
-        maxPoolSize,
-      });
+      const created =
+        client ??
+        new MongoClient(MONGODB_URI, {
+          serverSelectionTimeoutMS: 10_000,
+          maxPoolSize,
+        });
       await created.connect();
       client = created;
       return created;
@@ -154,25 +154,19 @@ export function getDb(): Db {
 
 async function ensureIndexes(db: Db): Promise<void> {
   await Promise.all([
-    db.collection('conversations').createIndexes([
-      { key: { created_at: -1 } },
-      { key: { status: 1, updated_at: -1 } },
-    ]),
-    db.collection('messages').createIndexes([
-      { key: { conversation_id: 1, created_at: 1, _id: 1 } },
-      { key: { created_at: 1 } },
-    ]),
+    db
+      .collection('conversations')
+      .createIndexes([{ key: { created_at: -1 } }, { key: { status: 1, updated_at: -1 } }]),
+    db
+      .collection('messages')
+      .createIndexes([{ key: { conversation_id: 1, created_at: 1, _id: 1 } }, { key: { created_at: 1 } }]),
     db.collection('idempotency_keys').createIndexes([
       { key: { conversation_id: 1, client_id: 1 }, unique: true },
       // TTL: entries disappear automatically 24h after creation.
       { key: { created_at: 1 }, expireAfterSeconds: 24 * 60 * 60 },
     ]),
-    db.collection('faqs').createIndexes([
-      { key: { category: 1, title: 1 } },
-    ]),
-    db.collection('knowledge_gaps').createIndexes([
-      { key: { status: 1, created_at: -1 } },
-    ]),
+    db.collection('faqs').createIndexes([{ key: { category: 1, title: 1 } }]),
+    db.collection('knowledge_gaps').createIndexes([{ key: { status: 1, created_at: -1 } }]),
   ]);
 }
 
@@ -247,7 +241,6 @@ export interface KnowledgeGapDoc {
   created_at: string;
   resolved_at?: string | null;
 }
-
 
 function conversations(): Collection<ConversationDoc> {
   return database!.collection<ConversationDoc>('conversations');
@@ -385,7 +378,9 @@ export function newId(): string {
 }
 
 function truncatePreview(content: string): string {
-  const flat = String(content ?? '').replace(/\s+/g, ' ').trim();
+  const flat = String(content ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (flat.length <= 140) return flat;
   return `${flat.slice(0, 139)}\u2026`;
 }
@@ -473,12 +468,7 @@ export async function listConversations(
   const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 100), 200));
   const offset = Math.max(0, Math.floor(options.offset ?? 0));
   const [docs, total] = await Promise.all([
-    conversations()
-      .find()
-      .sort({ updated_at: -1, _id: -1 })
-      .skip(offset)
-      .limit(limit)
-      .toArray(),
+    conversations().find().sort({ updated_at: -1, _id: -1 }).skip(offset).limit(limit).toArray(),
     conversations().countDocuments(),
   ]);
   return { items: docs.map(mapConversation), total };
@@ -642,11 +632,21 @@ export async function addMessage(input: AddMessageInput): Promise<Message> {
   };
 }
 
-export async function getMessages(conversationId: string): Promise<Message[]> {
+export async function getMessages(
+  conversationId: string,
+  options: { limit?: number } = {},
+): Promise<Message[]> {
+  // PRD-009: transcripts are bounded — read newest-first, cap, then restore
+  // chronological order. The default cap (500) is a safety net; HTTP routes
+  // pass a smaller page (200) via ?limit=. Internal history builders that
+  // need more pass an explicit limit.
+  const limit = options.limit === undefined ? 500 : Math.max(1, Math.min(Math.floor(options.limit), 1000));
   const docs = await messages()
     .find({ conversation_id: conversationId })
-    .sort({ created_at: 1, _id: 1 })
+    .sort({ created_at: -1, _id: -1 })
+    .limit(limit)
     .toArray();
+  docs.reverse();
   return docs.map(mapMessage);
 }
 
@@ -697,8 +697,14 @@ export async function recordMessageFeedback(
   return mapMessage(updated);
 }
 
-export async function listKnowledgeGaps(): Promise<KnowledgeGap[]> {
-  const docs = await knowledgeGaps().find().sort({ created_at: -1 }).limit(100).toArray();
+export async function listKnowledgeGaps(
+  options: { limit?: number; offset?: number } = {},
+): Promise<KnowledgeGap[]> {
+  // PRD-009: previously a hardcoded limit(100) with no paging; now bounded
+  // (default 100, max 200) with an offset.
+  const limit = options.limit === undefined ? 100 : Math.max(1, Math.min(Math.floor(options.limit), 200));
+  const offset = options.offset === undefined ? 0 : Math.max(0, Math.floor(options.offset));
+  const docs = await knowledgeGaps().find().sort({ created_at: -1 }).skip(offset).limit(limit).toArray();
   return docs.map((doc) => ({
     id: doc._id,
     conversationId: doc.conversation_id,
@@ -721,8 +727,6 @@ export async function resolveKnowledgeGap(id: string): Promise<boolean> {
   );
   return result.matchedCount > 0;
 }
-
-
 
 /* ------------------------------------------------------------------ *
  * Idempotency
@@ -749,8 +753,13 @@ export async function countFaqs(): Promise<number> {
   return faqsCollection().countDocuments();
 }
 
-export async function listFaqs(): Promise<Faq[]> {
-  const docs = await faqsCollection().find().sort({ category: 1, title: 1 }).toArray();
+export async function listFaqs(options: { limit?: number; offset?: number } = {}): Promise<Faq[]> {
+  // PRD-009: previously unbounded. Internal consumers (agent retrieval) pass
+  // no options and keep full-list behaviour; HTTP routes pass a bounded page.
+  const cursor = faqsCollection().find().sort({ category: 1, title: 1 });
+  if (options.offset !== undefined) cursor.skip(Math.max(0, Math.floor(options.offset)));
+  if (options.limit !== undefined) cursor.limit(Math.max(1, Math.min(Math.floor(options.limit), 500)));
+  const docs = await cursor.toArray();
   return docs.map(mapFaq);
 }
 
@@ -970,5 +979,3 @@ export async function getStats(days: number): Promise<StatsResult> {
     satisfaction,
   };
 }
-
-

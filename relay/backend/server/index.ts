@@ -235,7 +235,9 @@ export async function startServer(port: number = PORT, host: string = HOST) {
 
   const server = app.listen(port, host, () => {
     console.log(`[relay] Relay Store support backend listening on http://${host}:${port}`);
-    console.log(`[relay] mode=${MODE} adminAuthRequired=${ADMIN_AUTH_REQUIRED} db=mongodb://${store.DB_NAME}`);
+    console.log(
+      `[relay] mode=${MODE} adminAuthRequired=${ADMIN_AUTH_REQUIRED} db=mongodb://${store.DB_NAME}`,
+    );
   });
 
   const shutdown = async (signal: string) => {

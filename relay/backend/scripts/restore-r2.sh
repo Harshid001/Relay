@@ -10,6 +10,11 @@ set -euo pipefail
 ENV_FILE="${ENV_FILE:-/opt/relay/.env.r2}"
 [ -f "$ENV_FILE" ] && set -a && . "$ENV_FILE" && set +a
 
+# Database credentials live in /opt/relay/.env.prod (MONGO_ROOT_USER /
+# MONGO_ROOT_PASSWORD, PRD-007) — see backup-r2.sh for the rationale.
+PROD_ENV_FILE="${PROD_ENV_FILE:-/opt/relay/.env.prod}"
+[ -f "$PROD_ENV_FILE" ] && set -a && . "$PROD_ENV_FILE" && set +a
+
 : "${R2_ACCESS_KEY_ID:?missing R2_ACCESS_KEY_ID}"
 : "${R2_SECRET_ACCESS_KEY:?missing R2_SECRET_ACCESS_KEY}"
 : "${R2_ENDPOINT:?missing R2_ENDPOINT}"
@@ -30,7 +35,12 @@ echo "restoring $KEY"
 AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" \
   aws --endpoint-url "$R2_ENDPOINT" s3 cp "s3://$R2_BUCKET/$KEY" "$WORKDIR/dump.archive.gz"
 
+AUTH_ARGS=()
+if [ -n "${MONGO_ROOT_USER:-}" ]; then
+  AUTH_ARGS=(--username "$MONGO_ROOT_USER" --password "${MONGO_ROOT_PASSWORD:-}" --authenticationDatabase admin)
+fi
+
 docker compose -f /opt/relay/docker-compose.prod.yml exec -T mongo \
-  mongorestore --archive --gzip --drop --db "${MONGODB_DB:-relay}" < "$WORKDIR/dump.archive.gz"
+  mongorestore "${AUTH_ARGS[@]}" --archive --gzip --drop --db "${MONGODB_DB:-relay}" < "$WORKDIR/dump.archive.gz"
 
 echo "restore complete (app container will pick data up immediately)"

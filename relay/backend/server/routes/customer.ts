@@ -3,10 +3,9 @@
  * Mounted on both /api and /api/v1 (the versioned mount envelopes).
  */
 
-import type { RequestHandler, Router } from 'express';
+import type { Request, RequestHandler, Router } from 'express';
 
 import {
-
   generateLiveTurn,
   handoffMessage,
   type AgentTurnResult,
@@ -33,6 +32,7 @@ import {
   MAX_EMAIL,
   MAX_REASON,
   asRecord,
+  parsePagination,
   readOptionalString,
   readRequiredString,
 } from '../validation.js';
@@ -41,6 +41,11 @@ export function registerCustomerRoutes(router: Router): void {
   const apiLimiter = rateLimit('api', 600, 60_000);
   const writeLimiter = rateLimit('write', 120, 60_000);
   const messageLimiter = rateLimit('message', 40, 60_000);
+
+  // PRD-009: transcripts returned to clients are bounded (most recent N,
+  // chronological). Defaults keep every realistic conversation complete while
+  // bounding pathological payload sizes.
+  const messagePage = (req: Request): number => parsePagination(req.query, { limit: 200, max: 500 }).limit;
 
   /** Conversation owner guard - 404 for both missing and invalid tokens. */
   const requireConversationAccess: RequestHandler = wrap(async (req, res, next) => {
@@ -55,45 +60,55 @@ export function registerCustomerRoutes(router: Router): void {
 
   /* Public FAQs */
 
-  router.get('/faqs', apiLimiter, wrap(async (_req, res) => {
-    res.json(await store.listFaqs());
-  }));
+  router.get(
+    '/faqs',
+    apiLimiter,
+    wrap(async (req, res) => {
+      // PRD-009: previously unbounded; array shape preserved for compatibility.
+      const { limit, offset } = parsePagination(req.query, { limit: 200, max: 500 });
+      res.json(await store.listFaqs({ limit, offset }));
+    }),
+  );
 
   /* Customer conversations */
 
-  router.post('/conversations', writeLimiter, wrap(async (req, res) => {
-    // Free-plan guard: new conversations stop at the monthly cap; existing
-    // threads and human hand-offs stay available.
-    if (METERING_ENABLED) {
-      const { start } = currentMonthWindow();
-      const used = await store.countConversationsSince(start);
-      const hit = conversationsLimitReached(used);
-      if (hit) {
-        telemetry.recordPlanLimitRejection('conversations');
-        res.setHeader('Retry-After', String(Math.max(1, 3600)));
-        res.status(429).json({ error: limitMessage(hit) });
+  router.post(
+    '/conversations',
+    writeLimiter,
+    wrap(async (req, res) => {
+      // Free-plan guard: new conversations stop at the monthly cap; existing
+      // threads and human hand-offs stay available.
+      if (METERING_ENABLED) {
+        const { start } = currentMonthWindow();
+        const used = await store.countConversationsSince(start);
+        const hit = conversationsLimitReached(used);
+        if (hit) {
+          telemetry.recordPlanLimitRejection('conversations');
+          res.setHeader('Retry-After', String(Math.max(1, 3600)));
+          res.status(429).json({ error: limitMessage(hit) });
+          return;
+        }
+      }
+
+      const body = asRecord(req.body);
+
+      const customer = readOptionalString(body.customer, MAX_CUSTOMER);
+      if (customer === null) {
+        res.status(400).json({ error: `customer must be at most ${MAX_CUSTOMER} characters` });
         return;
       }
-    }
 
-    const body = asRecord(req.body);
+      const email = readOptionalString(body.email, MAX_EMAIL);
+      if (email === null) {
+        res.status(400).json({ error: `email must be at most ${MAX_EMAIL} characters` });
+        return;
+      }
 
-    const customer = readOptionalString(body.customer, MAX_CUSTOMER);
-    if (customer === null) {
-      res.status(400).json({ error: `customer must be at most ${MAX_CUSTOMER} characters` });
-      return;
-    }
-
-    const email = readOptionalString(body.email, MAX_EMAIL);
-    if (email === null) {
-      res.status(400).json({ error: `email must be at most ${MAX_EMAIL} characters` });
-      return;
-    }
-
-    const created = await store.createConversation({ customer, email });
-    emitConversation(created.conversation.id, created.conversation.status, created.conversation.title);
-    res.status(201).json({ conversation: created.conversation, accessToken: created.accessToken });
-  }));
+      const created = await store.createConversation({ customer, email });
+      emitConversation(created.conversation.id, created.conversation.status, created.conversation.title);
+      res.status(201).json({ conversation: created.conversation, accessToken: created.accessToken });
+    }),
+  );
 
   router.get(
     '/conversations/:id',
@@ -105,7 +120,10 @@ export function registerCustomerRoutes(router: Router): void {
         res.status(404).json({ error: 'Conversation not found' });
         return;
       }
-      res.json({ conversation, messages: await store.getMessages(conversation.id) });
+      res.json({
+        conversation,
+        messages: await store.getMessages(conversation.id, { limit: messagePage(req) }),
+      });
     }),
   );
 
@@ -143,7 +161,10 @@ export function registerCustomerRoutes(router: Router): void {
 
       // Idempotent retry: the same clientId returns the current state unchanged.
       if (clientId && (await store.hasIdempotencyKey(conversationId, clientId))) {
-        res.json({ conversation: existing, messages: await store.getMessages(conversationId) });
+        res.json({
+          conversation: existing,
+          messages: await store.getMessages(conversationId, { limit: messagePage(req) }),
+        });
         return;
       }
 
@@ -185,7 +206,7 @@ export function registerCustomerRoutes(router: Router): void {
             error: limitMessage(hit),
             aiMessagesLimitReached: true,
             conversation: updated,
-            messages: await store.getMessages(conversationId),
+            messages: await store.getMessages(conversationId, { limit: messagePage(req) }),
           });
           return;
         }
@@ -240,8 +261,15 @@ export function registerCustomerRoutes(router: Router): void {
         if (wasWaiting) {
           await store.updateConversation(conversationId, basePatch);
           const conversation = await store.getConversation(conversationId);
-          emitConversation(conversationId, conversation?.status ?? 'waiting', conversation?.title ?? undefined);
-          res.json({ conversation, messages: await store.getMessages(conversationId) });
+          emitConversation(
+            conversationId,
+            conversation?.status ?? 'waiting',
+            conversation?.title ?? undefined,
+          );
+          res.json({
+            conversation,
+            messages: await store.getMessages(conversationId, { limit: messagePage(req) }),
+          });
           return;
         }
 
@@ -255,14 +283,14 @@ export function registerCustomerRoutes(router: Router): void {
         let turn: AgentTurnResult;
         const aiStart = process.hrtime.bigint();
         try {
-            turn = await generateLiveTurn({
-              conversationId,
-              customer: existing.customer,
-              userText: content,
-              history,
-              faqs: await store.listFaqs(),
-              previousIntent,
-            });
+          turn = await generateLiveTurn({
+            conversationId,
+            customer: existing.customer,
+            userText: content,
+            history,
+            faqs: await store.listFaqs(),
+            previousIntent,
+          });
           const aiDurationMs = Number(process.hrtime.bigint() - aiStart) / 1e6;
           telemetry.recordAiTurn(true, aiDurationMs);
           telemetry.recordKbSearch(turn.sources.length > 0);
@@ -298,7 +326,10 @@ export function registerCustomerRoutes(router: Router): void {
           });
           const conversation = await store.getConversation(conversationId);
           emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-          res.json({ conversation, messages: await store.getMessages(conversationId) });
+          res.json({
+            conversation,
+            messages: await store.getMessages(conversationId, { limit: messagePage(req) }),
+          });
           return;
         }
 
@@ -316,7 +347,10 @@ export function registerCustomerRoutes(router: Router): void {
         }
 
         const lowStreak = turn.confidence === 'low' ? previousLowStreak + 1 : 0;
-        const reportedUnresolved = /\b(still (?:not|does(?:n['’]?t| not)|is(?:n['’]?t| not)|can(?:not|'t))|(?:did(?:n['’]?t| not)|does(?:n['’]?t| not)) (?:work|help|fix)|not (?:working|helpful|resolved|fixed)|same (?:problem|issue|error)|tried (?:that|this|everything)|no (?:luck|change))\b/i.test(content);
+        const reportedUnresolved =
+          /\b(still (?:not|does(?:n['’]?t| not)|is(?:n['’]?t| not)|can(?:not|'t))|(?:did(?:n['’]?t| not)|does(?:n['’]?t| not)) (?:work|help|fix)|not (?:working|helpful|resolved|fixed)|same (?:problem|issue|error)|tried (?:that|this|everything)|no (?:luck|change))\b/i.test(
+            content,
+          );
         // A successful order lookup is a resolved turn by construction.
         const orderLookupResolved = Boolean(turn.toolCall);
         // `sources` is only the retrieval context handed to the model,
@@ -374,7 +408,11 @@ export function registerCustomerRoutes(router: Router): void {
 
         const conversation = await store.getConversation(conversationId);
         emitConversation(conversationId, conversation?.status ?? null, conversation?.title ?? undefined);
-        res.json({ conversation, messages: await store.getMessages(conversationId), ...(toolEvent ? { toolEvent } : {}) });
+        res.json({
+          conversation,
+          messages: await store.getMessages(conversationId, { limit: messagePage(req) }),
+          ...(toolEvent ? { toolEvent } : {}),
+        });
       } finally {
         await releaseTurnLock(conversationId);
       }
@@ -460,9 +498,10 @@ export function registerCustomerRoutes(router: Router): void {
       const body = asRecord(req.body);
       const helpful = Boolean(body.helpful);
       const validReasons = ['incorrect', 'didnt_answer', 'missing_info', 'need_human'];
-      const reason = typeof body.reason === 'string' && validReasons.includes(body.reason)
-        ? (body.reason as 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human')
-        : null;
+      const reason =
+        typeof body.reason === 'string' && validReasons.includes(body.reason)
+          ? (body.reason as 'incorrect' | 'didnt_answer' | 'missing_info' | 'need_human')
+          : null;
       const comment = readOptionalString(body.comment, 500) ?? null;
 
       const updatedMessage = await store.recordMessageFeedback(conversationId, messageId, {

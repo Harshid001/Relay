@@ -7,7 +7,6 @@
 
 import type { Request, RequestHandler, Response } from 'express';
 
-
 export const PORT = Number(process.env.PORT ?? 3000);
 export const HOST = process.env.HOST ?? '127.0.0.1';
 
@@ -77,15 +76,22 @@ export function assertLiveConfig(): void {
     );
   }
   if (LIVE && !TRUST_PROXY_ENABLED) {
-    console.warn(
-      '[relay] WARNING: live mode is running without TRUST_PROXY. Behind a proxy or custom ' +
-        'domain this collapses all clients into one rate-limit bucket and drops the Secure ' +
-        'flag from session cookies. Set TRUST_PROXY to the number of proxy hops in front of ' +
-        'the app (1 behind a single Caddy/nginx, 2 when Cloudflare proxies into Caddy).',
-    );
+    // PRD-013: without TRUST_PROXY behind a TLS proxy every client collapses
+    // into one rate-limit bucket and session cookies lose the Secure flag.
+    // Refuse to start in production; development (NODE_ENV unset) keeps the
+    // warning so `npm run dev` works out of the box.
+    const message =
+      '[relay] live mode is running without TRUST_PROXY. Behind a proxy or custom ' +
+      'domain this collapses all clients into one rate-limit bucket and drops the Secure ' +
+      'flag from session cookies. Set TRUST_PROXY to the number of proxy hops in front of ' +
+      'the app (1 behind a single Caddy/nginx/Vercel, 2 when Cloudflare proxies into Caddy).';
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`[relay] refusing to start: ${message}`);
+      process.exit(1);
+    }
+    console.warn(`[relay] WARNING: ${message}`);
   }
 }
-
 
 /**
  * Sets the mode header and rejects requests whose Host or Origin is not an

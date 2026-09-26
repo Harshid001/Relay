@@ -111,22 +111,15 @@ export async function ensureAuthIndexes(db: Db): Promise<void> {
   await Promise.all([
     db.collection<UserDoc>('users').createIndex({ email: 1 }, { unique: true }),
     db.collection<SessionDoc>('sessions').createIndex({ user_id: 1 }),
-    db.collection<SessionDoc>('sessions').createIndex(
-      { expires_at: 1 },
-      { expireAfterSeconds: 0 },
-    ),
+    db.collection<SessionDoc>('sessions').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
     db.collection<AuditEventDoc>('audit_events').createIndex({ at: -1 }),
     db.collection<AuditEventDoc>('audit_events').createIndex({ actor_id: 1, at: -1 }),
     // Retention: `at` is an ISO string (TTL needs a Date), so expiry hangs
     // off a dedicated anchor set at insert time.
-    db.collection<AuditEventDoc>('audit_events').createIndex(
-      { expires_at: 1 },
-      { expireAfterSeconds: 0 },
-    ),
-    db.collection<EmailVerificationDoc>('email_verifications').createIndex(
-      { expires_at: 1 },
-      { expireAfterSeconds: 0 },
-    ),
+    db.collection<AuditEventDoc>('audit_events').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
+    db
+      .collection<EmailVerificationDoc>('email_verifications')
+      .createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
     db.collection<EmailVerificationDoc>('email_verifications').createIndex({ email: 1 }),
     db.collection<EmailVerificationDoc>('email_verifications').createIndex({ token: 1 }),
   ]);
@@ -212,6 +205,22 @@ export async function destroySession(token: string): Promise<void> {
   await sessions().deleteOne({ _id: tokenHash });
 }
 
+/**
+ * Ends sessions for a user (PRD-004). Pass the raw token of the session to
+ * keep (e.g. the one performing a password change) — every other session is
+ * revoked so a stolen session does not survive the victim's reset. Returns
+ * the number of revoked sessions.
+ */
+export async function destroyUserSessions(userId: string, exceptToken?: string): Promise<number> {
+  const filter: Record<string, unknown> = { user_id: userId };
+  if (exceptToken) {
+    const keepHash = crypto.createHash('sha256').update(exceptToken, 'utf8').digest('hex');
+    filter._id = { $ne: keepHash };
+  }
+  const result = await sessions().deleteMany(filter);
+  return result.deletedCount ?? 0;
+}
+
 async function userForToken(token: string): Promise<SessionUser | null> {
   const tokenHash = crypto.createHash('sha256').update(token, 'utf8').digest('hex');
   const session = await sessions().findOne({ _id: tokenHash });
@@ -260,8 +269,12 @@ export function setSessionCookie(req: Request, res: Response, token: string): vo
   res.setHeader('Set-Cookie', parts.join('; '));
 }
 
-export function clearSessionCookie(res: Response): void {
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+export function clearSessionCookie(req: Request, res: Response): void {
+  // PRD-013: mirror the Secure attribute used when the cookie was set —
+  // otherwise the cookie survives logout on HTTPS deployments.
+  const parts = [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+  if (requestIsSecure(req)) parts.push('Secure');
+  res.setHeader('Set-Cookie', parts.join('; '));
 }
 
 /* ------------------------------------------------------------------ *
@@ -290,12 +303,7 @@ export function isLoopbackRequest(req: Request): boolean {
   const forwarded = req.get('x-forwarded-for');
   if (forwarded) {
     const first = forwarded.split(',')[0].trim().toLowerCase();
-    if (
-      first !== '127.0.0.1' &&
-      first !== '::1' &&
-      first !== 'localhost' &&
-      !first.endsWith('127.0.0.1')
-    ) {
+    if (first !== '127.0.0.1' && first !== '::1' && first !== 'localhost' && !first.endsWith('127.0.0.1')) {
       return false;
     }
   }
@@ -432,8 +440,13 @@ export async function findUserByEmail(email: string): Promise<WithId<UserDoc> | 
   return users().findOne({ email: email.trim().toLowerCase() });
 }
 
-export async function listUsers(): Promise<Array<SessionUser & { createdAt: string; lastLoginAt: string | null }>> {
-  const docs = await users().find().sort({ created_at: 1 }).toArray();
+export async function listUsers(
+  options: { limit?: number; offset?: number } = {},
+): Promise<Array<SessionUser & { createdAt: string; lastLoginAt: string | null }>> {
+  // PRD-009: previously unsliced; now bounded (default 200, max 500).
+  const limit = options.limit === undefined ? 200 : Math.max(1, Math.min(Math.floor(options.limit), 500));
+  const offset = options.offset === undefined ? 0 : Math.max(0, Math.floor(options.offset));
+  const docs = await users().find().sort({ created_at: 1 }).skip(offset).limit(limit).toArray();
   return docs.map((doc) => ({
     id: doc._id,
     email: doc.email,
@@ -470,10 +483,7 @@ export async function createUser(input: CreateUserInput): Promise<SessionUser> {
   return { id: doc._id, email: doc.email, name: doc.name, role: doc.role };
 }
 
-export async function authenticate(
-  email: string,
-  password: string,
-): Promise<SessionUser | null> {
+export async function authenticate(email: string, password: string): Promise<SessionUser | null> {
   const user = await findUserByEmail(email);
   if (!user) {
     // Equalise timing between "no such user" and "wrong password".
@@ -494,10 +504,7 @@ export async function changePassword(
   if (!user) return false;
   if (!verifyPassword(currentPassword, user.password_salt, user.password_hash)) return false;
   const { hash, salt } = hashPassword(newPassword);
-  await users().updateOne(
-    { _id: userId },
-    { $set: { password_hash: hash, password_salt: salt } },
-  );
+  await users().updateOne({ _id: userId }, { $set: { password_hash: hash, password_salt: salt } });
   return true;
 }
 
@@ -511,7 +518,9 @@ export async function setUserRole(actor: SessionUser, userId: string, role: Role
  * Email verification (OTP + Magic Link)
  * ------------------------------------------------------------------ */
 
-export async function createEmailVerification(email: string): Promise<{ code: string; token: string; expiresAt: Date }> {
+export async function createEmailVerification(
+  email: string,
+): Promise<{ code: string; token: string; expiresAt: Date }> {
   const normalizedEmail = email.trim().toLowerCase();
   const code = String(crypto.randomInt(100000, 1000000));
   const codeHash = crypto.createHash('sha256').update(code, 'utf8').digest('hex');
@@ -617,12 +626,20 @@ export async function findOrCreateUserByEmail(email: string, name?: string): Pro
  * Google Sign-In (Token verification via Google OAuth2 API)
  * ------------------------------------------------------------------ */
 
-export async function verifyGoogleIdToken(idToken: string): Promise<{ email: string; name: string; picture?: string; sub: string } | null> {
+export async function verifyGoogleIdToken(
+  idToken: string,
+): Promise<{ email: string; name: string; picture?: string; sub: string } | null> {
   if (!idToken || typeof idToken !== 'string') return null;
   try {
-    const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+      {
+        // A hung Google endpoint must not hang sign-in (PRD-014).
+        signal: AbortSignal.timeout(5000),
+      },
+    );
     if (!res.ok) return null;
-    const data = await res.json() as {
+    const data = (await res.json()) as {
       email?: string;
       email_verified?: string | boolean;
       name?: string;

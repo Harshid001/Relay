@@ -66,7 +66,8 @@ sudo netfilter-persistent save
 
 ```bash
 # From your machine (or git clone on the VM):
-rsync -av --exclude node_modules --exclude dist --exclude data \
+# --exclude '.env*' is load-bearing: never ship local secret files to the VM.
+rsync -av --exclude node_modules --exclude dist --exclude data --exclude '.env*' \
   ./relay/ ubuntu@<VM_PUBLIC_IP>:/opt/relay/
 ```
 
@@ -132,6 +133,21 @@ chmod +x /opt/relay/scripts/backup-r2.sh /opt/relay/scripts/restore-r2.sh
 /opt/relay/scripts/restore-r2.sh mongo/relay-2026-09-22_030000.archive.gz
 ```
 
+### 6b · Pre-production release gate (PRD-006 — do not launch without this)
+
+Backups are opt-in automation, so the release is not approved until a human
+attaches this evidence:
+
+- **RPO ≤ 24 h:** the nightly cron above is installed (`crontab -l` shows it)
+  and at least one dump has uploaded to R2 (check the bucket prefix `mongo/`).
+- **RTO rehearsed:** one restore into a scratch database completed — either
+  the monthly GitHub rehearsal log (`.github/workflows/backup.yml`, requires
+  `BACKUP_ENABLED=true` + `MONGODB_URI` / `R2_*` secrets) or a manual run of
+  `restore-r2.sh` against a throwaway `MONGODB_DB`. Restores use `--drop`:
+  never rehearse against production data.
+- **Rollback path known:** the operator has read §7 (app rollback keeps
+  `/opt/relay-prev` or a known-good SHA; data rollback replaces collections).
+
 ## 7 · Operations runbook
 
 ```bash
@@ -148,8 +164,9 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 # Restart cleanly
 docker compose -f docker-compose.prod.yml restart app
 
-# Mongo shell
-docker compose -f docker-compose.prod.yml exec mongo mongosh relay
+# Mongo shell (authenticate with the MONGO_ROOT_* credentials from .env.prod)
+set -a; . /opt/relay/.env.prod; set +a
+docker compose -f docker-compose.prod.yml exec mongo mongosh -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin relay
 ```
 
 ### Rollback (bad deploy)
@@ -181,15 +198,20 @@ Order matters: app first, data only if needed, health-check after each step.
 ## 8 · Hardening checklist (do these before sharing the URL)
 
 - [ ] `ADMIN_TOKEN` is a fresh `openssl rand -hex 32`
+- [ ] `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD` are set (fresh random password)
 - [ ] `BOOTSTRAP_ADMIN_PASSWORD` is unique and 12+ chars
 - [ ] `SEED_DEMO` is unset or not `true` (demo seeding is opt-in, so a fresh
       production workspace has no sample conversations)
 - [ ] `DOMAIN` is set (the compose file adds it to `ALLOWED_HOSTS`) — without
       it every public request gets `403 Forbidden host`
+- [ ] `frontend/public/sitemap.xml` uses the real domain (replace the
+      `relay.yourdomain.com` placeholder), and `og:image`/`twitter:image`
+      (`frontend/index.html`) point at the real `https://<domain>/og-image.png`
 - [ ] VM security list exposes **only** 80/443
 - [ ] `https://yourdomain/api/health` returns `status:"ok"`
 - [ ] First login works, then invite real agents via Settings
-- [ ] Test a backup **and** a restore once
+- [ ] Test a backup **and** a restore once (see §6b — attach the evidence to the release)
+- [ ] `TRUST_PROXY=1` is set (the server refuses to start in production without it)
 - [ ] Resend: verify your sending domain, then set `NOTIFY_FROM_EMAIL`
 - [ ] Optional: Cloudflare Access in front of `/app` for IP-independent 2FA
 - [ ] Optional: swap DNS-01 challenge on so certs renew even behind strict proxies

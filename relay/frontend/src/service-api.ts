@@ -110,7 +110,7 @@ async function request<T>(path: string, init: RequestInit = {}, ownerToken?: str
   return payload as T;
 }
 
-const post = <T,>(path: string, body?: unknown, token?: string) =>
+const post = <T>(path: string, body?: unknown, token?: string) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }, token);
 
 /* ---------------------------------------------------------------- *
@@ -137,8 +137,7 @@ export const api = {
   reply: (id: string, content: string) =>
     post<Message>(`/api/admin/conversations/${encodeURIComponent(id)}/reply`, { content }),
 
-  resolve: (id: string) =>
-    post<Conversation>(`/api/admin/conversations/${encodeURIComponent(id)}/resolve`),
+  resolve: (id: string) => post<Conversation>(`/api/admin/conversations/${encodeURIComponent(id)}/resolve`),
 
   assign: (id: string, name: string) =>
     post<Conversation>(`/api/admin/conversations/${encodeURIComponent(id)}/assign`, { name }),
@@ -153,14 +152,12 @@ export const api = {
       body: JSON.stringify(input),
     }),
 
-  listKnowledgeGaps: () =>
-    request<{ items: KnowledgeGap[] }>('/api/admin/knowledge-gaps'),
+  listKnowledgeGaps: () => request<{ items: KnowledgeGap[] }>('/api/admin/knowledge-gaps'),
 
   resolveKnowledgeGap: (id: string) =>
     post<{ ok: true }>(`/api/admin/knowledge-gaps/${encodeURIComponent(id)}/resolve`),
 
-  seedSampleKnowledge: () =>
-    post<{ items: Faq[] }>('/api/admin/onboarding/sample-knowledge'),
+  seedSampleKnowledge: () => post<{ items: Faq[] }>('/api/admin/onboarding/sample-knowledge'),
 };
 
 /* ---------------------------------------------------------------- *
@@ -222,6 +219,15 @@ export const authApi = {
   logout: async () => {
     try {
       return await post<{ ok: true }>('/api/auth/logout');
+    } finally {
+      clearCsrfToken();
+    }
+  },
+
+  // PRD-004: revokes every session for the account, including this one.
+  logoutAll: async () => {
+    try {
+      return await post<{ ok: true; revoked: number }>('/api/auth/logout-all');
     } finally {
       clearCsrfToken();
     }
@@ -299,9 +305,8 @@ export function loadCustomerStore(): CustomerStore {
     if (!raw) return { activeId: null, sessions: [] };
     const parsed = JSON.parse(raw) as Partial<CustomerStore>;
     if (!parsed || !Array.isArray(parsed.sessions)) return { activeId: null, sessions: [] };
-    const sessions = parsed.sessions.filter(
-      (entry): entry is CustomerStore['sessions'][number] =>
-        Boolean(entry && typeof entry.id === 'string' && typeof entry.token === 'string'),
+    const sessions = parsed.sessions.filter((entry): entry is CustomerStore['sessions'][number] =>
+      Boolean(entry && typeof entry.id === 'string' && typeof entry.token === 'string'),
     );
     const activeId = sessions.some((s) => s.id === parsed.activeId) ? (parsed.activeId ?? null) : null;
     return { activeId, sessions };

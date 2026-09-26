@@ -175,9 +175,7 @@ class TelemetryCollector {
         ? Math.round((this.httpDurationSumMs / this.httpRequestsTotal) * 10) / 10
         : null;
     const avgAiMs =
-      this.aiLatencyCount > 0
-        ? Math.round((this.aiLatencySumMs / this.aiLatencyCount) * 10) / 10
-        : null;
+      this.aiLatencyCount > 0 ? Math.round((this.aiLatencySumMs / this.aiLatencyCount) * 10) / 10 : null;
 
     // Component statuses
     const apiStatus: SystemComponentHealth = {
@@ -230,12 +228,11 @@ class TelemetryCollector {
       },
     };
 
-    const overallStatus: 'healthy' | 'degraded' | 'unhealthy' =
-      !params.dbConnected
-        ? 'unhealthy'
-        : [apiStatus, databaseStatus, aiStatus, sseStatus, kbStatus].some((c) => c.status === 'degraded')
-          ? 'degraded'
-          : 'healthy';
+    const overallStatus: 'healthy' | 'degraded' | 'unhealthy' = !params.dbConnected
+      ? 'unhealthy'
+      : [apiStatus, databaseStatus, aiStatus, sseStatus, kbStatus].some((c) => c.status === 'degraded')
+        ? 'degraded'
+        : 'healthy';
 
     return {
       status: overallStatus,

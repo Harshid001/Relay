@@ -15,21 +15,27 @@ import { openapi } from '../openapi.js';
 import { telemetry } from '../telemetry.js';
 
 export function registerSystemRoutes(router: Router, deps: { requireUser: RequestHandler }): void {
-  router.get('/health', wrap(async (_req: Request, res: Response) => {
-    const ping = await store.pingDatabase();
-    const database = ping.ok ? 'up' : 'down';
-    res.status(database === 'up' ? 200 : 503).json({
-      status: database === 'up' ? 'ok' : 'degraded',
-      mode: MODE,
-      checks: { database },
-      adminAuthRequired: ADMIN_AUTH_REQUIRED,
-      plan: 'free',
-      trustProxy: TRUST_PROXY_ENABLED,
-      monitoring: monitoringEnabled(),
-    });
-  }));
+  router.get(
+    '/health',
+    wrap(async (_req: Request, res: Response) => {
+      const ping = await store.pingDatabase();
+      const database = ping.ok ? 'up' : 'down';
+      res.status(database === 'up' ? 200 : 503).json({
+        status: database === 'up' ? 'ok' : 'degraded',
+        mode: MODE,
+        checks: { database },
+        adminAuthRequired: ADMIN_AUTH_REQUIRED,
+        plan: 'free',
+        trustProxy: TRUST_PROXY_ENABLED,
+        monitoring: monitoringEnabled(),
+      });
+    }),
+  );
 
-  router.get('/metrics', (_req: Request, res: Response) => {
+  // PRD-008: counters and component detail are authenticated. The minimal
+  // liveness signal stays public at GET /health (used by container
+  // healthchecks and uptime probes without credentials).
+  router.get('/metrics', deps.requireUser, (_req: Request, res: Response) => {
     res.type('text/plain; version=0.0.4').send(metricsText());
   });
 
@@ -50,8 +56,10 @@ export function registerSystemRoutes(router: Router, deps: { requireUser: Reques
     res.status(report.status === 'unhealthy' ? 503 : 200).json(report);
   });
 
+  // Full telemetry (component status, counts, uptime) requires a session:
+  // the public /health endpoint above is the unauthenticated signal.
   router.get('/admin/system-health', deps.requireUser, systemHealth);
-  router.get('/health/system', systemHealth);
+  router.get('/health/system', deps.requireUser, systemHealth);
 
   // Auth router mounted on /api/auth and /api/v1/auth
   router.use('/auth', authRouter);

@@ -6,24 +6,76 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
-  AlertCircle, ArrowRight, BarChart3, BookOpen, Bot, Check, CheckCircle2, Code, Copy,
-  HelpCircle, Inbox, LayoutDashboard, LifeBuoy, MessageSquare,
-  MessagesSquare, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Settings as SettingsIcon,
-  ShieldCheck, Star, UserRound, Users, X,
+  AlertCircle,
+  ArrowRight,
+  BarChart3,
+  BookOpen,
+  Bot,
+  Check,
+  CheckCircle2,
+  Code,
+  Copy,
+  HelpCircle,
+  Inbox,
+  LayoutDashboard,
+  LifeBuoy,
+  MessageSquare,
+  MessagesSquare,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Send,
+  Sparkles,
+  Settings as SettingsIcon,
+  ShieldCheck,
+  Star,
+  UserRound,
+  Users,
+  X,
 } from 'lucide-react';
 
-import { AuthError, api, getAdminToken, setAdminToken } from '../service-api';
+import { AuthError, api, setAdminToken } from '../service-api';
 import type { SessionUser } from '../service-api';
 import type {
-  Conversation, ConversationDetail, ConversationStatus, Faq, FaqInput, Health, Intent,
-  KnowledgeGap, Stats, SystemHealthReport, Usage,
+  Conversation,
+  ConversationDetail,
+  ConversationStatus,
+  Faq,
+  FaqInput,
+  Health,
+  Intent,
+  KnowledgeGap,
+  Stats,
+  SystemHealthReport,
+  Usage,
 } from '../service-types';
 import { AccountCard } from '../Auth';
 import {
-  Avatar, BusinessStoryCard, CitedAnswer, EmptyState, INTENTS, INTENT_LABEL, IntentBars, IntentPill,
-  lastCustomerQueryRef, LogoMark, Modal, Spinner, StatCard, statCards,
-  StatusPill, VolumeChart, MessageBubble, currentGreeting, errorMessage,
-  formatDateTime, timeAgo, todayLabel, getFriendlyName,
+  Avatar,
+  BusinessStoryCard,
+  CitedAnswer,
+  EmptyState,
+  INTENTS,
+  INTENT_LABEL,
+  IntentBars,
+  IntentPill,
+  lastCustomerQueryRef,
+  LogoMark,
+  Modal,
+  Spinner,
+  StatCard,
+  statCards,
+  StatusPill,
+  VolumeChart,
+  MessageBubble,
+  currentGreeting,
+  errorMessage,
+  formatDateTime,
+  timeAgo,
+  todayLabel,
+  getFriendlyName,
+  useFocusTrap,
 } from '../ui/shared';
 
 /* ================================================================== *
@@ -79,7 +131,9 @@ export function SupportWidget() {
       wide
       footer={
         <>
-          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          <button className="btn btn-ghost" onClick={onClose}>
+            Close
+          </button>
           <button className="btn btn-primary" onClick={copyCode}>
             {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
             {copied ? 'Copied to clipboard' : 'Copy code snippet'}
@@ -89,11 +143,7 @@ export function SupportWidget() {
     >
       <div className="modal-body">
         <div className="segmented" style={{ marginBottom: 16 }}>
-          <button
-            type="button"
-            className={tab === 'script' ? 'active' : ''}
-            onClick={() => setTab('script')}
-          >
+          <button type="button" className={tab === 'script' ? 'active' : ''} onClick={() => setTab('script')}>
             HTML / Vanilla JS
           </button>
           <button
@@ -103,11 +153,7 @@ export function SupportWidget() {
           >
             Shopify / WooCommerce
           </button>
-          <button
-            type="button"
-            className={tab === 'react' ? 'active' : ''}
-            onClick={() => setTab('react')}
-          >
+          <button type="button" className={tab === 'react' ? 'active' : ''} onClick={() => setTab('react')}>
             React / Next.js
           </button>
         </div>
@@ -132,18 +178,27 @@ export function SupportWidget() {
 
         <div className="card" style={{ marginTop: 16, padding: 14, background: 'var(--surface-sunken)' }}>
           <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>How it works on your site:</div>
-          <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 12.5, color: 'var(--ink-muted)', lineHeight: 1.6 }}>
+          <ul
+            style={{
+              margin: '8px 0 0 18px',
+              padding: 0,
+              fontSize: 12.5,
+              color: 'var(--ink-muted)',
+              lineHeight: 1.6,
+            }}
+          >
             <li>Non-intrusive floating launcher button in the bottom right corner.</li>
             <li>Grounded solely in your knowledge base articles — zero hallucinations.</li>
-            <li>When confidence is low or the customer requests a person, it automatically escalates to this inbox.</li>
+            <li>
+              When confidence is low or the customer requests a person, it automatically escalates to this
+              inbox.
+            </li>
           </ul>
         </div>
       </div>
     </Modal>
   );
 }
-
-
 
 /* ================================================================== *
  * Onboarding Card (Quick Setup Guide)
@@ -160,7 +215,13 @@ interface OnboardingCardProps {
 }
 
 function OnboardingCard({
-  faqCount, onSeedSample, seedingSample, onOpenKb, onPreview, onInstallWidget, onViewInbox,
+  faqCount,
+  onSeedSample,
+  seedingSample,
+  onOpenKb,
+  onPreview,
+  onInstallWidget,
+  onViewInbox,
 }: OnboardingCardProps) {
   const [dismissed, setDismissed] = useState(() => {
     try {
@@ -214,7 +275,8 @@ function OnboardingCard({
           </div>
           <h2 className="onboarding-title">Get your AI support ready in 4 easy steps</h2>
           <p className="onboarding-sub">
-            Teach your AI store policies, test verified responses in the sandbox, and connect live chat to your customers.
+            Teach your AI store policies, test verified responses in the sandbox, and connect live chat to
+            your customers.
           </p>
         </div>
 
@@ -225,10 +287,7 @@ function OnboardingCard({
               <span className="progress-count">{completedSteps} / 4 ready</span>
             </div>
             <div className="mini-progress-track">
-              <div
-                className="mini-progress-fill"
-                style={{ width: `${Math.max(25, progressPct)}%` }}
-              />
+              <div className="mini-progress-fill" style={{ width: `${Math.max(25, progressPct)}%` }} />
             </div>
           </div>
           <button
@@ -262,7 +321,8 @@ function OnboardingCard({
           <div className="step-body">
             <div className="step-title">1. Add store policies</div>
             <div className="step-sub">
-              Upload policies or load standard e-commerce defaults (Shipping, Returns, Refunds, Tracking, Support).
+              Upload policies or load standard e-commerce defaults (Shipping, Returns, Refunds, Tracking,
+              Support).
             </div>
             <div className="step-actions">
               <button
@@ -274,11 +334,7 @@ function OnboardingCard({
                 {seedingSample ? <Spinner size={12} /> : <Sparkles size={12} aria-hidden="true" />}
                 {step1Done ? 'Reload sample policies' : 'Use sample policies'}
               </button>
-              <button
-                type="button"
-                className="btn btn-outline btn-xs"
-                onClick={onOpenKb}
-              >
+              <button type="button" className="btn btn-outline btn-xs" onClick={onOpenKb}>
                 <Plus size={12} aria-hidden="true" />
                 Add custom FAQ
               </button>
@@ -295,14 +351,11 @@ function OnboardingCard({
           <div className="step-body">
             <div className="step-title">2. Test your AI in chat</div>
             <div className="step-sub">
-              Ask tricky customer questions, verify cited sources, and watch how it triggers a human handoff when unsure.
+              Ask tricky customer questions, verify cited sources, and watch how it triggers a human handoff
+              when unsure.
             </div>
             <div className="step-actions">
-              <button
-                type="button"
-                className="btn btn-outline btn-xs"
-                onClick={onPreview}
-              >
+              <button type="button" className="btn btn-outline btn-xs" onClick={onPreview}>
                 <MessageSquare size={12} aria-hidden="true" />
                 Test customer chat ↗
               </button>
@@ -319,14 +372,11 @@ function OnboardingCard({
           <div className="step-body">
             <div className="step-title">3. Connect storefront</div>
             <div className="step-sub">
-              Install the lightweight chat bubble on Shopify, WooCommerce, or any custom storefront with a single script tag.
+              Install the lightweight chat bubble on Shopify, WooCommerce, or any custom storefront with a
+              single script tag.
             </div>
             <div className="step-actions">
-              <button
-                type="button"
-                className="btn btn-outline btn-xs"
-                onClick={onInstallWidget}
-              >
+              <button type="button" className="btn btn-outline btn-xs" onClick={onInstallWidget}>
                 <Code size={12} aria-hidden="true" />
                 Get embed code
               </button>
@@ -343,14 +393,11 @@ function OnboardingCard({
           <div className="step-body">
             <div className="step-title">4. Go live & monitor</div>
             <div className="step-sub">
-              Confident answers are handled automatically. Every customer escalation flows directly to your human inbox.
+              Confident answers are handled automatically. Every customer escalation flows directly to your
+              human inbox.
             </div>
             <div className="step-actions">
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs"
-                onClick={onViewInbox}
-              >
+              <button type="button" className="btn btn-ghost btn-xs" onClick={onViewInbox}>
                 <Inbox size={12} aria-hidden="true" />
                 View live inbox →
               </button>
@@ -379,12 +426,25 @@ interface OverviewProps {
   onSeedSample: () => void;
   seedingSample: boolean;
   faqCount: number;
-
 }
 
 function OverviewPage({
-  session, stats, statsLoading, conversations, loading, days, onDays, onOpen, onViewAll, onOpenKb,
-  onPreview, onNewConversation, onInstallWidget, onSeedSample, seedingSample, faqCount,
+  session,
+  stats,
+  statsLoading,
+  conversations,
+  loading,
+  days,
+  onDays,
+  onOpen,
+  onViewAll,
+  onOpenKb,
+  onPreview,
+  onNewConversation,
+  onInstallWidget,
+  onSeedSample,
+  seedingSample,
+  faqCount,
 }: OverviewProps) {
   const [query, setQuery] = useState('');
   const userName = getFriendlyName(session, 'there');
@@ -410,11 +470,14 @@ function OverviewPage({
           </div>
           <div className="greeting-meta">
             <span className="badge badge-ok">
-              <CheckCircle2 size={12} aria-hidden="true" />All systems operational
+              <CheckCircle2 size={12} aria-hidden="true" />
+              All systems operational
             </span>
             <span className="date-chip">{todayLabel()}</span>
           </div>
-          <h1 className="page-title">{currentGreeting()}, {userName} 👋</h1>
+          <h1 className="page-title">
+            {currentGreeting()}, {userName} 👋
+          </h1>
           <p className="page-sub">Here’s how your store support and AI resolutions are performing today.</p>
         </div>
         <div className="head-actions">
@@ -432,13 +495,16 @@ function OverviewPage({
             ))}
           </div>
           <button className="btn btn-outline" onClick={onInstallWidget}>
-            <Code size={15} aria-hidden="true" />Install widget
+            <Code size={15} aria-hidden="true" />
+            Install widget
           </button>
           <button className="btn btn-outline" onClick={onPreview}>
-            <MessageSquare size={15} aria-hidden="true" />Preview chat
+            <MessageSquare size={15} aria-hidden="true" />
+            Preview chat
           </button>
           <button className="btn btn-primary" onClick={onNewConversation}>
-            <Plus size={15} aria-hidden="true" />New conversation
+            <Plus size={15} aria-hidden="true" />
+            New conversation
           </button>
         </div>
       </header>
@@ -468,12 +534,13 @@ function OverviewPage({
         <div className="banner-body">
           <div className="banner-title">Your support, on autopilot</div>
           <p className="banner-text">
-            Relay answers from your knowledge base, cites the article it used, and hands the
-            conversation to a human the moment it matters. {stats ? `${stats.waiting} waiting for a human right now.` : ''}
+            Relay answers from your knowledge base, cites the article it used, and hands the conversation to a
+            human the moment it matters. {stats ? `${stats.waiting} waiting for a human right now.` : ''}
           </p>
         </div>
         <button className="btn-link" onClick={onOpenKb}>
-          Manage knowledge base<ArrowRight size={13} aria-hidden="true" />
+          Manage knowledge base
+          <ArrowRight size={13} aria-hidden="true" />
         </button>
       </section>
 
@@ -482,13 +549,14 @@ function OverviewPage({
           <div className="card-head">
             <div>
               <div className="card-title">Conversation volume</div>
-              <div className="card-sub">
-                Conversations started per day, split by who handled them.
-              </div>
+              <div className="card-sub">Conversations started per day, split by who handled them.</div>
             </div>
           </div>
           {statsLoading && !stats ? (
-            <div className="loading-block"><Spinner />Loading volume…</div>
+            <div className="loading-block">
+              <Spinner />
+              Loading volume…
+            </div>
           ) : (
             <VolumeChart data={stats?.volume ?? []} />
           )}
@@ -524,18 +592,25 @@ function OverviewPage({
               />
             </div>
             <button className="btn btn-ghost btn-sm" onClick={onViewAll}>
-              View all<ArrowRight size={14} aria-hidden="true" />
+              View all
+              <ArrowRight size={14} aria-hidden="true" />
             </button>
           </div>
         </div>
         {loading && conversations.length === 0 ? (
           <div className="stack" style={{ padding: 22 }}>
-            {[0, 1, 2, 3].map((i) => <div key={i} className="skeleton-row" />)}
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="skeleton-row" />
+            ))}
           </div>
         ) : recent.length === 0 ? (
           <EmptyState
             title={query ? 'No conversations match that search' : 'No conversations yet'}
-            text={query ? 'Try a different customer, subject or keyword.' : 'Start one from the customer preview to see it here.'}
+            text={
+              query
+                ? 'Try a different customer, subject or keyword.'
+                : 'Start one from the customer preview to see it here.'
+            }
           />
         ) : (
           <div className="table-scroll">
@@ -548,24 +623,17 @@ function OverviewPage({
                   <th scope="col">Status</th>
                   <th scope="col">Updated</th>
                   <th scope="col">Assignee</th>
+                  <th scope="col">
+                    <span className="sr-only">Open conversation</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
+                {/* PRD-017: rows stay clickable for pointer users; keyboard and
+                    screen-reader users get a real button (tr role=button is
+                    invalid HTML and breaks table semantics). */}
                 {recent.map((conversation) => (
-                  <tr
-                    key={conversation.id}
-                    className="clickable"
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`Open conversation: ${conversation.title}`}
-                    onClick={() => onOpen(conversation.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        onOpen(conversation.id);
-                      }
-                    }}
-                  >
+                  <tr key={conversation.id} className="clickable" onClick={() => onOpen(conversation.id)}>
                     <td>
                       <div className="cell-customer">
                         <Avatar name={conversation.customer} email={conversation.email} />
@@ -579,10 +647,27 @@ function OverviewPage({
                       <div className="topic-title">{conversation.title}</div>
                       <div className="topic-preview">{conversation.preview || 'No messages yet'}</div>
                     </td>
-                    <td><IntentPill intent={conversation.intent} /></td>
-                    <td><StatusPill status={conversation.status} /></td>
+                    <td>
+                      <IntentPill intent={conversation.intent} />
+                    </td>
+                    <td>
+                      <StatusPill status={conversation.status} />
+                    </td>
                     <td className="cell-muted">{timeAgo(conversation.updatedAt)}</td>
                     <td className="cell-assignee">{conversation.assignee ?? 'Unassigned'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        aria-label={`Open conversation: ${conversation.title}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpen(conversation.id);
+                        }}
+                      >
+                        Open
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -615,12 +700,15 @@ function ConversationsPage({ conversations, loading, onOpen, newWaitingIds }: Co
   const [tab, setTab] = useState<StatusTab>('all');
   const [intent, setIntent] = useState<'all' | Intent>('all');
 
-  const counts = useMemo(() => ({
-    all: conversations.length,
-    open: conversations.filter((c) => c.status === 'open').length,
-    waiting: conversations.filter((c) => c.status === 'waiting').length,
-    resolved: conversations.filter((c) => c.status === 'resolved').length,
-  }), [conversations]);
+  const counts = useMemo(
+    () => ({
+      all: conversations.length,
+      open: conversations.filter((c) => c.status === 'open').length,
+      waiting: conversations.filter((c) => c.status === 'waiting').length,
+      resolved: conversations.filter((c) => c.status === 'resolved').length,
+    }),
+    [conversations],
+  );
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -693,7 +781,9 @@ function ConversationsPage({ conversations, loading, onOpen, newWaitingIds }: Co
             >
               <option value="all">All intents</option>
               {INTENTS.map((value) => (
-                <option key={value} value={value}>{INTENT_LABEL[value]}</option>
+                <option key={value} value={value}>
+                  {INTENT_LABEL[value]}
+                </option>
               ))}
             </select>
           </div>
@@ -703,7 +793,10 @@ function ConversationsPage({ conversations, loading, onOpen, newWaitingIds }: Co
         </div>
 
         {loading && conversations.length === 0 ? (
-          <div className="loading-block"><Spinner />Loading conversations…</div>
+          <div className="loading-block">
+            <Spinner />
+            Loading conversations…
+          </div>
         ) : filtered.length === 0 ? (
           <EmptyState
             title="Nothing matches these filters"
@@ -720,24 +813,17 @@ function ConversationsPage({ conversations, loading, onOpen, newWaitingIds }: Co
                   <th scope="col">Status</th>
                   <th scope="col">Updated</th>
                   <th scope="col">Assignee</th>
+                  <th scope="col">
+                    <span className="sr-only">Open conversation</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
+                {/* PRD-017: rows stay clickable for pointer users; keyboard and
+                    screen-reader users get a real button (tr role=button is
+                    invalid HTML and breaks table semantics). */}
                 {filtered.map((conversation) => (
-                  <tr
-                    key={conversation.id}
-                    className="clickable"
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`Open conversation: ${conversation.title}`}
-                    onClick={() => onOpen(conversation.id)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        onOpen(conversation.id);
-                      }
-                    }}
-                  >
+                  <tr key={conversation.id} className="clickable" onClick={() => onOpen(conversation.id)}>
                     <td>
                       <div className="cell-customer">
                         <Avatar name={conversation.customer} email={conversation.email} />
@@ -754,12 +840,29 @@ function ConversationsPage({ conversations, loading, onOpen, newWaitingIds }: Co
                     <td>
                       <div className="row" style={{ gap: 6 }}>
                         <IntentPill intent={conversation.intent} />
-                        {newWaitingIds.has(conversation.id) ? <span className="badge badge-new">New</span> : null}
+                        {newWaitingIds.has(conversation.id) ? (
+                          <span className="badge badge-new">New</span>
+                        ) : null}
                       </div>
                     </td>
-                    <td><StatusPill status={conversation.status} /></td>
+                    <td>
+                      <StatusPill status={conversation.status} />
+                    </td>
                     <td className="cell-muted">{timeAgo(conversation.updatedAt)}</td>
                     <td className="cell-assignee">{conversation.assignee ?? 'Unassigned'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        aria-label={`Open conversation: ${conversation.title}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpen(conversation.id);
+                        }}
+                      >
+                        Open
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -783,7 +886,6 @@ interface DrawerProps {
   onUpdated: (conversation: Conversation) => void;
   onOpenSource: (source: { id: string; title: string }) => void;
   onError: (error: unknown) => void;
-
 }
 
 function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSource, onError }: DrawerProps) {
@@ -793,27 +895,37 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
   const [busy, setBusy] = useState<'reply' | 'resolve' | 'assign' | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const lastStamp = useRef('');
+  // PRD-017: dialog semantics — initial focus, Tab confinement, focus return.
+  const panelRef = useRef<HTMLElement>(null);
+  useFocusTrap(panelRef);
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
 
-  const apply = useCallback((next: ConversationDetail) => {
-    // Skip no-op refreshes from polling so the workspace does not re-render for nothing.
-    const stamp = [
-      next.conversation.updatedAt,
-      next.conversation.status,
-      next.conversation.assignee ?? '',
-      next.conversation.rating ?? '',
-      next.messages.length,
-    ].join('|');
-    if (stamp === lastStamp.current) return;
-    lastStamp.current = stamp;
-    setDetail(next);
-    onUpdated(next.conversation);
-  }, [onUpdated]);
+  const apply = useCallback(
+    (next: ConversationDetail) => {
+      // Skip no-op refreshes from polling so the workspace does not re-render for nothing.
+      const stamp = [
+        next.conversation.updatedAt,
+        next.conversation.status,
+        next.conversation.assignee ?? '',
+        next.conversation.rating ?? '',
+        next.messages.length,
+      ].join('|');
+      if (stamp === lastStamp.current) return;
+      lastStamp.current = stamp;
+      setDetail(next);
+      onUpdated(next.conversation);
+    },
+    [onUpdated],
+  );
 
   useEffect(() => {
     let cancelled = false;
     lastStamp.current = '';
     setLoading(true);
-    api.getConversation(id)
+    api
+      .getConversation(id)
       .then((data) => {
         if (!cancelled) apply(data);
       })
@@ -823,7 +935,9 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id, apply, onError]);
 
   // Poll the transcript while the drawer is open so human replies land live.
@@ -905,7 +1019,7 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
   const currentAgentName = session ? getFriendlyName(session) : 'Support Agent';
   const isAssignedToMe = Boolean(
     conversation &&
-    (conversation.assignee === currentAgentName || (session?.name && conversation.assignee === session.name))
+    (conversation.assignee === currentAgentName || (session?.name && conversation.assignee === session.name)),
   );
 
   const doAssign = async () => {
@@ -925,7 +1039,14 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
   return (
     <>
       <div className="overlay" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label="Conversation detail">
+      <aside
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Conversation detail"
+        tabIndex={-1}
+        ref={panelRef}
+      >
         <div className="drawer-head">
           <div className="row" style={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div style={{ minWidth: 0 }}>
@@ -942,19 +1063,22 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
             <div className="row row-wrap" style={{ marginTop: 12 }}>
               <IntentPill intent={conversation.intent} />
               <StatusPill status={conversation.status} />
-              {conversation.rating ? (
-                <span className="pill">Rated {conversation.rating}/5</span>
-              ) : null}
-
+              {conversation.rating ? <span className="pill">Rated {conversation.rating}/5</span> : null}
             </div>
           ) : null}
         </div>
 
         <div className="drawer-body" ref={logRef}>
           {loading && !detail ? (
-            <div className="loading-block"><Spinner />Loading transcript…</div>
+            <div className="loading-block">
+              <Spinner />
+              Loading transcript…
+            </div>
           ) : !conversation ? (
-            <EmptyState title="Conversation unavailable" text="It may have been removed. Close this panel and try again." />
+            <EmptyState
+              title="Conversation unavailable"
+              text="It may have been removed. Close this panel and try again."
+            />
           ) : (
             <>
               {conversation.status === 'waiting' || conversation.escalationReason ? (
@@ -967,7 +1091,8 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
                       {conversation.status === 'waiting' ? 'Needs Human Support' : 'Escalation Record'}
                     </div>
                     <div className="escalation-alert-reason">
-                      <strong>Reason for escalation:</strong> {conversation.escalationReason || 'Customer requested human support'}
+                      <strong>Reason for escalation:</strong>{' '}
+                      {conversation.escalationReason || 'Customer requested human support'}
                     </div>
                   </div>
                 </div>
@@ -982,7 +1107,9 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
                   <dt>Last update</dt>
                   <dd>{formatDateTime(conversation.updatedAt)}</dd>
                   <dt>Intent</dt>
-                  <dd><IntentPill intent={conversation.intent} /></dd>
+                  <dd>
+                    <IntentPill intent={conversation.intent} />
+                  </dd>
                   <dt>Reason for escalation</dt>
                   <dd>{conversation.escalationReason ?? 'None (direct AI resolution)'}</dd>
                   <dt>Knowledge used</dt>
@@ -1034,7 +1161,9 @@ function ConversationDrawer({ id, session, faqs, onClose, onUpdated, onOpenSourc
                 </div>
               </div>
 
-              <div className="eyebrow" style={{ marginBottom: 12 }}>Conversation log</div>
+              <div className="eyebrow" style={{ marginBottom: 12 }}>
+                Conversation log
+              </div>
               {messages.length === 0 ? (
                 <EmptyState title="No messages yet" text="This thread has not received a customer message." />
               ) : (
@@ -1121,7 +1250,12 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
   const [loadingGaps, setLoadingGaps] = useState(false);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<'all' | Intent>('all');
-  const [editing, setEditing] = useState<{ id: string | null; gapId?: string; draft: FaqInput; tagsText: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: string | null;
+    gapId?: string;
+    draft: FaqInput;
+    tagsText: string;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
 
   const refreshGaps = useCallback(async () => {
@@ -1161,13 +1295,14 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
       title,
       answer,
       category: editing.draft.category,
-      tags: editing.tagsText.split(',').map((tag) => tag.trim()).filter(Boolean),
+      tags: editing.tagsText
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean),
     };
     setSaving(true);
     try {
-      const saved = editing.id
-        ? await api.updateFaq(editing.id, payload)
-        : await api.createFaq(payload);
+      const saved = editing.id ? await api.updateFaq(editing.id, payload) : await api.createFaq(payload);
       onSaved(saved);
       if (editing.gapId) {
         await api.resolveKnowledgeGap(editing.gapId);
@@ -1192,17 +1327,12 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
           </div>
           <h1 className="page-title">Knowledge base</h1>
           <p className="page-sub">
-            Every answer Relay gives is grounded in approved policies. Keep them accurate and the
-            assistant stays accurate.
+            Every answer Relay gives is grounded in approved policies. Keep them accurate and the assistant
+            stays accurate.
           </p>
         </div>
         <div className="head-actions">
-          <button
-            type="button"
-            className="btn btn-outline"
-            onClick={onSeedSample}
-            disabled={seedingSample}
-          >
+          <button type="button" className="btn btn-outline" onClick={onSeedSample} disabled={seedingSample}>
             {seedingSample ? <Spinner size={14} /> : <Sparkles size={14} aria-hidden="true" />}
             Use sample policies
           </button>
@@ -1211,7 +1341,8 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
             className="btn btn-primary"
             onClick={() => setEditing({ id: null, draft: { ...EMPTY_FAQ }, tagsText: '' })}
           >
-            <Plus size={15} aria-hidden="true" />New article
+            <Plus size={15} aria-hidden="true" />
+            New article
           </button>
         </div>
       </header>
@@ -1258,7 +1389,10 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
           </div>
 
           {loadingGaps && gaps.length === 0 ? (
-            <div className="loading-block"><Spinner />Loading knowledge gaps…</div>
+            <div className="loading-block">
+              <Spinner />
+              Loading knowledge gaps…
+            </div>
           ) : gaps.length === 0 ? (
             <EmptyState
               title="No open knowledge gaps"
@@ -1355,7 +1489,9 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
               >
                 <option value="all">All categories</option>
                 {INTENTS.map((value) => (
-                  <option key={value} value={value}>{INTENT_LABEL[value]}</option>
+                  <option key={value} value={value}>
+                    {INTENT_LABEL[value]}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1365,13 +1501,18 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
           </div>
 
           {loading && faqs.length === 0 ? (
-            <div className="loading-block"><Spinner />Loading articles…</div>
+            <div className="loading-block">
+              <Spinner />
+              Loading articles…
+            </div>
           ) : filtered.length === 0 ? (
             <EmptyState
               title={query || category !== 'all' ? 'No articles match' : 'No articles yet'}
-              text={query || category !== 'all'
-                ? 'Try another search term or category.'
-                : 'Add your first article so Relay has something to answer from.'}
+              text={
+                query || category !== 'all'
+                  ? 'Try another search term or category.'
+                  : 'Add your first article so Relay has something to answer from.'
+              }
             />
           ) : (
             filtered.map((faq) => (
@@ -1387,15 +1528,22 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
                   <button
                     className="btn btn-outline btn-sm"
                     aria-label={`Edit article: ${faq.title}`}
-                    onClick={() => setEditing({ id: faq.id, draft: { ...faq }, tagsText: faq.tags.join(', ') })}
+                    onClick={() =>
+                      setEditing({ id: faq.id, draft: { ...faq }, tagsText: faq.tags.join(', ') })
+                    }
                   >
-                    <Pencil size={13} aria-hidden="true" />Edit
+                    <Pencil size={13} aria-hidden="true" />
+                    Edit
                   </button>
                 </div>
                 <p className="faq-answer">{faq.answer}</p>
                 {faq.tags.length > 0 ? (
                   <div className="tag-row">
-                    {faq.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                    {faq.tags.map((tag) => (
+                      <span className="tag" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
               </article>
@@ -1454,11 +1602,16 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
                 value={editing.draft.category}
                 aria-label="Article category"
                 onChange={(event) =>
-                  setEditing({ ...editing, draft: { ...editing.draft, category: event.target.value as Intent } })
+                  setEditing({
+                    ...editing,
+                    draft: { ...editing.draft, category: event.target.value as Intent },
+                  })
                 }
               >
                 {INTENTS.map((value) => (
-                  <option key={value} value={value}>{INTENT_LABEL[value]}</option>
+                  <option key={value} value={value}>
+                    {INTENT_LABEL[value]}
+                  </option>
                 ))}
               </select>
             </label>
@@ -1471,7 +1624,9 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
                 placeholder="refund, billing, timeline"
                 onChange={(event) => setEditing({ ...editing, tagsText: event.target.value })}
               />
-              <span className="hint">Comma separated. Tags help the assistant match a question to this article.</span>
+              <span className="hint">
+                Comma separated. Tags help the assistant match a question to this article.
+              </span>
             </label>
           </div>
         </Modal>
@@ -1485,7 +1640,10 @@ function KnowledgePage({ faqs, loading, onSaved, onSeedSample, seedingSample, on
  * ================================================================== */
 
 function AnalyticsPage({
-  stats, loading, days, onDays,
+  stats,
+  loading,
+  days,
+  onDays,
 }: {
   stats: Stats | null;
   loading: boolean;
@@ -1495,9 +1653,10 @@ function AnalyticsPage({
   const cards = statCards(stats, days);
   const ratings = stats?.satisfaction ?? [];
   const ratingCount = stats?.ratingCount ?? 0;
-  const average = ratingCount > 0
-    ? (ratings.reduce((sum, entry) => sum + entry.score * entry.count, 0) / ratingCount).toFixed(2)
-    : null;
+  const average =
+    ratingCount > 0
+      ? (ratings.reduce((sum, entry) => sum + entry.score * entry.count, 0) / ratingCount).toFixed(2)
+      : null;
 
   return (
     <>
@@ -1531,7 +1690,9 @@ function AnalyticsPage({
       <BusinessStoryCard stats={stats} days={days} />
 
       <div className="grid-stats">
-        {cards.map(({ key, ...card }) => <StatCard key={key} {...card} />)}
+        {cards.map(({ key, ...card }) => (
+          <StatCard key={key} {...card} />
+        ))}
       </div>
 
       <div className="grid-stats">
@@ -1572,7 +1733,10 @@ function AnalyticsPage({
           </div>
         </div>
         {loading && !stats ? (
-          <div className="loading-block"><Spinner />Loading volume…</div>
+          <div className="loading-block">
+            <Spinner />
+            Loading volume…
+          </div>
         ) : (
           <VolumeChart data={stats?.volume ?? []} />
         )}
@@ -1584,7 +1748,9 @@ function AnalyticsPage({
             <div>
               <div className="card-title">Rating distribution</div>
               <div className="card-sub">
-                {ratingCount > 0 ? `${ratingCount} ratings · average ${average} of 5` : 'No ratings collected yet.'}
+                {ratingCount > 0
+                  ? `${ratingCount} ratings · average ${average} of 5`
+                  : 'No ratings collected yet.'}
               </div>
             </div>
           </div>
@@ -1598,10 +1764,18 @@ function AnalyticsPage({
                 return (
                   <div key={score}>
                     <div className="bar-head">
-                      <span className="bar-name">{score} star{score === 1 ? '' : 's'}</span>
-                      <span className="bar-val">{count} · {pct}%</span>
+                      <span className="bar-name">
+                        {score} star{score === 1 ? '' : 's'}
+                      </span>
+                      <span className="bar-val">
+                        {count} · {pct}%
+                      </span>
                     </div>
-                    <div className="bar-track" role="img" aria-label={`${score} stars: ${count} ratings, ${pct} percent`}>
+                    <div
+                      className="bar-track"
+                      role="img"
+                      aria-label={`${score} stars: ${count} ratings, ${pct} percent`}
+                    >
                       <div className="bar-fill" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
@@ -1647,9 +1821,7 @@ function AnalyticsPage({
           <div className="funnel-step">
             <div className="funnel-step-num">Step 2</div>
             <div className="funnel-step-name">AI Grounded Answers</div>
-            <div className="funnel-step-val">
-              {stats ? (stats.aiResolutions + stats.humanHandoffs) : 0}
-            </div>
+            <div className="funnel-step-val">{stats ? stats.aiResolutions + stats.humanHandoffs : 0}</div>
             <div className="funnel-step-sub">Checked against verified KB</div>
           </div>
 
@@ -1699,64 +1871,106 @@ function AnalyticsPage({
             </thead>
             <tbody>
               <tr>
-                <td><strong>1. Landing page visit</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>1. Landing page visit</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Positioning: "Answer when confident, escalate when necessary"</td>
                 <td className="cell-muted">Traffic & interest</td>
               </tr>
               <tr>
-                <td><strong>2. Start free / Signup</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>2. Start free / Signup</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Frictionless entry without mandatory credit card</td>
                 <td className="cell-muted">Account creation rate</td>
               </tr>
               <tr>
-                <td><strong>3. Workspace created</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>3. Workspace created</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Immediate ready-to-test workspace</td>
                 <td className="cell-muted">Workspace readiness</td>
               </tr>
               <tr>
-                <td><strong>4. Knowledge added</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>4. Knowledge added</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Upload FAQ / Paste text</td>
                 <td className="cell-muted">Verified articles</td>
               </tr>
               <tr>
-                <td><strong>5. First AI question</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>5. First AI question</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Customer asks support question in preview or widget</td>
                 <td className="cell-muted">First message latency</td>
               </tr>
               <tr>
-                <td><strong>6. First cited answer</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>6. First cited answer</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Trustworthy answer citing verified knowledge articles</td>
                 <td className="cell-muted">Citation accuracy (100%)</td>
               </tr>
               <tr>
-                <td><strong>7. Safe human handoff</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>7. Safe human handoff</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Low confidence or out-of-scope triggers handoff without guessing</td>
                 <td className="cell-muted">{stats ? `${stats.humanHandoffs} handoffs` : '0'}</td>
               </tr>
               <tr>
-                <td><strong>8. Agent inbox takeover</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>8. Agent inbox takeover</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Agent sees intent, full transcript, knowledge used, escalation reason</td>
                 <td className="cell-muted">Realtime SSE queue</td>
               </tr>
               <tr>
-                <td><strong>9. Conversation resolved</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>9. Conversation resolved</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Agent or AI resolves thread cleanly</td>
                 <td className="cell-muted">{stats ? `${stats.resolved} resolved` : '0'}</td>
               </tr>
               <tr>
-                <td><strong>10. Customer CSAT rating</strong></td>
-                <td><span className="badge badge-ok">Active</span></td>
+                <td>
+                  <strong>10. Customer CSAT rating</strong>
+                </td>
+                <td>
+                  <span className="badge badge-ok">Active</span>
+                </td>
                 <td>Customer rates 1-5 stars & message feedback thumbs</td>
-                <td className="cell-muted">{stats && stats.csat !== null ? `${stats.csat}% CSAT` : 'Pending'}</td>
+                <td className="cell-muted">
+                  {stats && stats.csat !== null ? `${stats.csat}% CSAT` : 'Pending'}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -1771,13 +1985,14 @@ function AnalyticsPage({
  * ================================================================== */
 
 function SettingsPage({
-  health, healthError, onRefreshHealth,
+  health,
+  healthError,
+  onRefreshHealth,
 }: {
   health: Health | null;
   healthError: string | null;
   onRefreshHealth: () => void;
 }) {
-
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [sysReport, setSysReport] = useState<SystemHealthReport | null>(null);
@@ -1787,7 +2002,8 @@ function SettingsPage({
   const fetchSysHealth = useCallback(() => {
     setSysLoading(true);
     setSysError(null);
-    api.getSystemHealth()
+    api
+      .getSystemHealth()
       .then((report) => {
         setSysReport(report);
         setSysLoading(false);
@@ -1800,11 +2016,18 @@ function SettingsPage({
 
   useEffect(() => {
     let cancelled = false;
-    api.getUsage()
-      .then((summary) => { if (!cancelled) setUsage(summary); })
-      .catch((error) => { if (!cancelled) setUsageError(errorMessage(error)); });
+    api
+      .getUsage()
+      .then((summary) => {
+        if (!cancelled) setUsage(summary);
+      })
+      .catch((error) => {
+        if (!cancelled) setUsageError(errorMessage(error));
+      });
     fetchSysHealth();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [fetchSysHealth]);
 
   const handleRefresh = useCallback(() => {
@@ -1818,7 +2041,9 @@ function SettingsPage({
       <div style={{ marginBottom: 14 }}>
         <div className="bar-head">
           <span className="bar-name">{label}</span>
-          <span className="bar-val">{used.toLocaleString()} / {limit === null ? '∞' : limit.toLocaleString()} · {percent}%</span>
+          <span className="bar-val">
+            {used.toLocaleString()} / {limit === null ? '∞' : limit.toLocaleString()} · {percent}%
+          </span>
         </div>
         <div
           className="bar-track"
@@ -1848,7 +2073,8 @@ function SettingsPage({
         </div>
         <div className="head-actions">
           <button className="btn btn-outline" onClick={handleRefresh}>
-            <RefreshCw size={15} aria-hidden="true" />Refresh status
+            <RefreshCw size={15} aria-hidden="true" />
+            Refresh status
           </button>
         </div>
       </header>
@@ -1858,69 +2084,132 @@ function SettingsPage({
           <div className="card-head">
             <div>
               <div className="card-title">System Health & Telemetry</div>
-              <div className="card-sub">Real-time status of production subsystems (<span className="code">GET /api/admin/system-health</span>).</div>
+              <div className="card-sub">
+                Real-time status of production subsystems (
+                <span className="code">GET /api/admin/system-health</span>).
+              </div>
             </div>
-            <span className={`badge ${sysReport?.status === 'healthy' ? 'badge-ok' : sysReport?.status === 'degraded' ? 'badge-warn' : 'badge-danger'}`}>
-              ● {sysReport?.status === 'healthy' ? 'All Systems Healthy' : sysReport?.status ?? 'Checking...'}
+            <span
+              className={`badge ${sysReport?.status === 'healthy' ? 'badge-ok' : sysReport?.status === 'degraded' ? 'badge-warn' : 'badge-danger'}`}
+            >
+              ●{' '}
+              {sysReport?.status === 'healthy' ? 'All Systems Healthy' : (sysReport?.status ?? 'Checking...')}
             </span>
           </div>
           <div className="card-pad">
             {sysLoading ? (
-              <div className="loading-block"><Spinner />Checking system health…</div>
+              <div className="loading-block">
+                <Spinner />
+                Checking system health…
+              </div>
             ) : sysError ? (
-              <p className="note" style={{ color: 'var(--danger)' }}>{sysError}</p>
+              <p className="note" style={{ color: 'var(--danger)' }}>
+                {sysError}
+              </p>
             ) : sysReport ? (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 16 }}>
-                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: 10,
+                    marginBottom: 16,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: 12,
+                      background: 'var(--surface-sunken)',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>API Gateway</span>
-                      <span className={`badge ${sysReport.components.api.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                      <span
+                        className={`badge ${sysReport.components.api.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}
+                      >
                         ● {sysReport.components.api.status}
                       </span>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
-                      {sysReport.telemetry.http.avgDurationMs !== null ? `${sysReport.telemetry.http.avgDurationMs}ms avg latency` : 'Active'}
+                      {sysReport.telemetry.http.avgDurationMs !== null
+                        ? `${sysReport.telemetry.http.avgDurationMs}ms avg latency`
+                        : 'Active'}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                      {sysReport.telemetry.http.requestsTotal} reqs · {sysReport.telemetry.http.responses2xx} 2xx · {sysReport.telemetry.http.responses4xx} 4xx · {sysReport.telemetry.http.responses5xx} 5xx
+                      {sysReport.telemetry.http.requestsTotal} reqs · {sysReport.telemetry.http.responses2xx}{' '}
+                      2xx · {sysReport.telemetry.http.responses4xx} 4xx ·{' '}
+                      {sysReport.telemetry.http.responses5xx} 5xx
                     </div>
                   </div>
 
-                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      background: 'var(--surface-sunken)',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>Database</span>
-                      <span className={`badge ${sysReport.components.database.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                      <span
+                        className={`badge ${sysReport.components.database.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}
+                      >
                         ● {sysReport.components.database.status}
                       </span>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
-                      {sysReport.telemetry.database.pingLatencyMs !== null ? `${sysReport.telemetry.database.pingLatencyMs}ms ping` : 'Connected'}
+                      {sysReport.telemetry.database.pingLatencyMs !== null
+                        ? `${sysReport.telemetry.database.pingLatencyMs}ms ping`
+                        : 'Connected'}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
                       {sysReport.telemetry.database.errorsTotal} connection errors
                     </div>
                   </div>
 
-                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      background: 'var(--surface-sunken)',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>AI Provider</span>
-                      <span className={`badge ${sysReport.components.aiProvider.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                      <span
+                        className={`badge ${sysReport.components.aiProvider.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}
+                      >
                         ● {sysReport.components.aiProvider.status}
                       </span>
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 6 }}>
-                      {sysReport.telemetry.ai.avgLatencyMs !== null ? `${sysReport.telemetry.ai.avgLatencyMs}ms avg latency` : 'Standby'}
+                      {sysReport.telemetry.ai.avgLatencyMs !== null
+                        ? `${sysReport.telemetry.ai.avgLatencyMs}ms avg latency`
+                        : 'Standby'}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                      {sysReport.telemetry.ai.requestsTotal} turns · {sysReport.telemetry.ai.failuresTotal} failures
+                      {sysReport.telemetry.ai.requestsTotal} turns · {sysReport.telemetry.ai.failuresTotal}{' '}
+                      failures
                     </div>
                   </div>
 
-                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      background: 'var(--surface-sunken)',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>Realtime / SSE</span>
-                      <span className={`badge ${sysReport.components.realtimeSse.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                      <span
+                        className={`badge ${sysReport.components.realtimeSse.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}
+                      >
                         ● {sysReport.components.realtimeSse.status}
                       </span>
                     </div>
@@ -1932,10 +2221,19 @@ function SettingsPage({
                     </div>
                   </div>
 
-                  <div style={{ padding: 12, background: 'var(--surface-sunken)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      background: 'var(--surface-sunken)',
+                      borderRadius: 8,
+                      border: '1px solid var(--border)',
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 600, fontSize: 13 }}>Knowledge Base</span>
-                      <span className={`badge ${sysReport.components.knowledgeBase.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}>
+                      <span
+                        className={`badge ${sysReport.components.knowledgeBase.status === 'healthy' ? 'badge-ok' : 'badge-warn'}`}
+                      >
                         ● {sysReport.components.knowledgeBase.status}
                       </span>
                     </div>
@@ -1943,7 +2241,8 @@ function SettingsPage({
                       {sysReport.telemetry.knowledgeBase.faqCount} articles indexed
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                      {sysReport.telemetry.knowledgeBase.searchesTotal} searches · {sysReport.telemetry.knowledgeBase.zeroMatchSearches} zero matches
+                      {sysReport.telemetry.knowledgeBase.searchesTotal} searches ·{' '}
+                      {sysReport.telemetry.knowledgeBase.zeroMatchSearches} zero matches
                     </div>
                   </div>
                 </div>
@@ -1954,16 +2253,15 @@ function SettingsPage({
                       <>
                         <dt>Plan Rejections</dt>
                         <dd>
-                          {sysReport.telemetry.planLimits.conversationsRejected} conversations · {sysReport.telemetry.planLimits.aiMessagesRejected} AI messages
+                          {sysReport.telemetry.planLimits.conversationsRejected} conversations ·{' '}
+                          {sysReport.telemetry.planLimits.aiMessagesRejected} AI messages
                         </dd>
                       </>
                     )}
                     {sysReport.telemetry.handoffs && (
                       <>
                         <dt>Handoffs Recorded</dt>
-                        <dd>
-                          {sysReport.telemetry.handoffs.total} total
-                        </dd>
+                        <dd>{sysReport.telemetry.handoffs.total} total</dd>
                       </>
                     )}
                   </dl>
@@ -1977,24 +2275,32 @@ function SettingsPage({
           <div className="card-head">
             <div>
               <div className="card-title">Free plan — this month</div>
-              <div className="card-sub">Relay is free: conversations and AI answers reset every calendar month.</div>
+              <div className="card-sub">
+                Relay is free: conversations and AI answers reset every calendar month.
+              </div>
             </div>
             <span className="badge badge-ok">Free</span>
           </div>
           <div className="card-pad">
             {usageError ? (
-              <p className="note" style={{ color: 'var(--danger)' }}>{usageError}</p>
+              <p className="note" style={{ color: 'var(--danger)' }}>
+                {usageError}
+              </p>
             ) : usage ? (
               <>
                 {meterRow('Conversations', usage.conversationsUsed, usage.conversationsLimit)}
                 {meterRow('AI answers', usage.aiMessagesUsed, usage.aiMessagesLimit)}
                 <p className="note" style={{ marginTop: 8 }}>
-                  Human replies, escalations and ratings are never metered. Self-hosting? Raise or remove the caps
-                  with <span className="code">FREE_CONVERSATIONS_LIMIT</span> and <span className="code">FREE_AI_MESSAGES_LIMIT</span> (0 = unlimited).
+                  Human replies, escalations and ratings are never metered. Self-hosting? Raise or remove the
+                  caps with <span className="code">FREE_CONVERSATIONS_LIMIT</span> and{' '}
+                  <span className="code">FREE_AI_MESSAGES_LIMIT</span> (0 = unlimited).
                 </p>
               </>
             ) : (
-              <div className="loading-block"><Spinner />Loading usage…</div>
+              <div className="loading-block">
+                <Spinner />
+                Loading usage…
+              </div>
             )}
           </div>
         </section>
@@ -2003,15 +2309,17 @@ function SettingsPage({
           <div className="card-head">
             <div>
               <div className="card-title">Runtime status</div>
-              <div className="card-sub">Read from the server at <span className="code">GET /api/health</span>.</div>
+              <div className="card-sub">
+                Read from the server at <span className="code">GET /api/health</span>.
+              </div>
             </div>
-            <span className="badge badge-ok">
-              Live mode
-            </span>
+            <span className="badge badge-ok">Live mode</span>
           </div>
           <div className="card-pad">
             {healthError ? (
-              <p className="note" style={{ color: 'var(--danger)' }}>{healthError}</p>
+              <p className="note" style={{ color: 'var(--danger)' }}>
+                {healthError}
+              </p>
             ) : (
               <dl className="kv">
                 <dt>Health</dt>
@@ -2035,9 +2343,13 @@ function SettingsPage({
           <div className="card-head">
             <div>
               <div className="card-title">Server setup</div>
-              <div className="card-sub">Configured on the server environment — never entered in this interface.</div>
+              <div className="card-sub">
+                Configured on the server environment — never entered in this interface.
+              </div>
             </div>
-            <span className="stat-icon"><ShieldCheck size={17} aria-hidden="true" /></span>
+            <span className="stat-icon">
+              <ShieldCheck size={17} aria-hidden="true" />
+            </span>
           </div>
           <div className="card-pad">
             <p className="note">
@@ -2045,17 +2357,38 @@ function SettingsPage({
               process runs, then restart it.
             </p>
             <dl className="kv" style={{ marginTop: 16 }}>
-              <dt><span className="code">CODEBUDDY_LIVE</span></dt>
-              <dd>Set to <span className="code">true</span> to answer with the CodeBuddy agent.</dd>
-              <dt><span className="code">ADMIN_TOKEN</span></dt>
-              <dd>Optional shared secret. When set, this workspace asks for it once per browser session and sends it as <span className="code">x-admin-token</span>.</dd>
-              <dt><span className="code">MONGODB_URI</span></dt>
-              <dd>Connection string for the MongoDB server. Defaults to <span className="code">mongodb://127.0.0.1:27017</span>; use an Atlas URI in production.</dd>
-              <dt><span className="code">DATA_DIR</span></dt>
+              <dt>
+                <span className="code">CODEBUDDY_LIVE</span>
+              </dt>
+              <dd>
+                Set to <span className="code">true</span> to answer with the CodeBuddy agent.
+              </dd>
+              <dt>
+                <span className="code">ADMIN_TOKEN</span>
+              </dt>
+              <dd>
+                Optional shared secret. When set, this workspace asks for it once per browser session and
+                sends it as <span className="code">x-admin-token</span>.
+              </dd>
+              <dt>
+                <span className="code">MONGODB_URI</span>
+              </dt>
+              <dd>
+                Connection string for the MongoDB server. Defaults to{' '}
+                <span className="code">mongodb://127.0.0.1:27017</span>; use an Atlas URI in production.
+              </dd>
+              <dt>
+                <span className="code">DATA_DIR</span>
+              </dt>
               <dd>Directory for local artifacts. Defaults to the server working directory.</dd>
 
-              <dt><span className="code">PORT</span></dt>
-              <dd>Port the API listens on. Defaults to <span className="code">3000</span>; the dev client proxies <span className="code">/api</span> to it.</dd>
+              <dt>
+                <span className="code">PORT</span>
+              </dt>
+              <dd>
+                Port the API listens on. Defaults to <span className="code">3000</span>; the dev client
+                proxies <span className="code">/api</span> to it.
+              </dd>
             </dl>
           </div>
         </section>
@@ -2064,19 +2397,24 @@ function SettingsPage({
           <div className="card-head">
             <div>
               <div className="card-title">CodeBuddy integration</div>
-              <div className="card-sub">Only used when <span className="code">CODEBUDDY_LIVE=true</span>.</div>
+              <div className="card-sub">
+                Only used when <span className="code">CODEBUDDY_LIVE=true</span>.
+              </div>
             </div>
-            <span className="stat-icon lime"><Bot size={17} aria-hidden="true" /></span>
+            <span className="stat-icon lime">
+              <Bot size={17} aria-hidden="true" />
+            </span>
           </div>
           <div className="card-pad">
             <p className="note">
-              In live mode Relay calls the CodeBuddy Agent SDK for a single, tool-free turn. The SDK reads its own
-              credentials from the server environment, so there is nothing to paste into this app. The agent receives
-              the knowledge base as context and returns a structured reply plus the article ids it used.
+              In live mode Relay calls the CodeBuddy Agent SDK for a single, tool-free turn. The SDK reads its
+              own credentials from the server environment, so there is nothing to paste into this app. The
+              agent receives the knowledge base as context and returns a structured reply plus the article ids
+              it used.
             </p>
             <p className="note" style={{ marginTop: 10 }}>
-              If that call fails, the conversation is handed to a human, so
-              customers never see a guess presented as a real answer.
+              If that call fails, the conversation is handed to a human, so customers never see a guess
+              presented as a real answer.
             </p>
           </div>
         </section>
@@ -2087,20 +2425,37 @@ function SettingsPage({
               <div className="card-title">Connectors</div>
               <div className="card-sub">What Relay can actually reach today.</div>
             </div>
-            <span className="stat-icon mist"><LifeBuoy size={17} aria-hidden="true" /></span>
+            <span className="stat-icon mist">
+              <LifeBuoy size={17} aria-hidden="true" />
+            </span>
           </div>
           <div className="card-pad">
             <div className="row row-wrap" style={{ gap: 8, marginBottom: 12 }}>
-              <span className="badge badge-ok"><Check size={12} aria-hidden="true" />Knowledge base</span>
-              <span className="badge badge-ok"><Check size={12} aria-hidden="true" />Conversation store</span>
-              <span className="badge badge-warn"><AlertCircle size={12} aria-hidden="true" />No order system</span>
-              <span className="badge badge-warn"><AlertCircle size={12} aria-hidden="true" />No refund or payment system</span>
-              <span className="badge badge-warn"><AlertCircle size={12} aria-hidden="true" />No account or identity system</span>
+              <span className="badge badge-ok">
+                <Check size={12} aria-hidden="true" />
+                Knowledge base
+              </span>
+              <span className="badge badge-ok">
+                <Check size={12} aria-hidden="true" />
+                Conversation store
+              </span>
+              <span className="badge badge-warn">
+                <AlertCircle size={12} aria-hidden="true" />
+                No order system
+              </span>
+              <span className="badge badge-warn">
+                <AlertCircle size={12} aria-hidden="true" />
+                No refund or payment system
+              </span>
+              <span className="badge badge-warn">
+                <AlertCircle size={12} aria-hidden="true" />
+                No account or identity system
+              </span>
             </div>
             <p className="note">
-              There is no live order, refund, payment or account connector. Relay cannot read or change order state,
-              issue or check refunds, or verify identity — so it never claims to. Requests that need those systems are
-              handed to a human agent, who can act on them outside this chat.
+              There is no live order, refund, payment or account connector. Relay cannot read or change order
+              state, issue or check refunds, or verify identity — so it never claims to. Requests that need
+              those systems are handed to a human agent, who can act on them outside this chat.
             </p>
           </div>
         </section>
@@ -2118,11 +2473,12 @@ type Page = 'overview' | 'conversations' | 'knowledge' | 'analytics' | 'settings
 interface AdminProps {
   session: SessionUser | null;
   onSignOut: () => void;
+  onSignOutAll?: () => void;
   onPreviewChat: () => void;
   onNewConversation: () => void;
 }
 
-function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: AdminProps) {
+function AdminApp({ session, onSignOut, onSignOutAll, onPreviewChat, onNewConversation }: AdminProps) {
   const [page, setPage] = useState<Page>('overview');
   const [days, setDays] = useState<7 | 30>(7);
   const daysRef = useRef<7 | 30>(7);
@@ -2138,7 +2494,9 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
   const [ready, setReady] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [source, setSource] = useState<{ id: string; title: string } | null>(null);
-  const [toast, setToast] = useState<{ kind: 'error' | 'info'; text: string; retry?: () => void } | null>(null);
+  const [toast, setToast] = useState<{ kind: 'error' | 'info'; text: string; retry?: () => void } | null>(
+    null,
+  );
   const [authNeeded, setAuthNeeded] = useState(false);
   const [authDraft, setAuthDraft] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -2186,48 +2544,51 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
     }
   }, [handleError]);
 
-  const reload = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const [page, nextStats, nextFaqs] = await Promise.all([
-        api.listConversations(),
-        api.getStats(daysRef.current),
-        api.listFaqs(),
-      ]);
-      setConversations(page.items);
-      setStats(nextStats);
-      setFaqs(nextFaqs);
-      lastLoadedDays.current = daysRef.current;
-      setReady(true);
-      setAuthNeeded(false);
-      setToast((current) => (current && current.kind === 'error' ? null : current));
+  const reload = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const [page, nextStats, nextFaqs] = await Promise.all([
+          api.listConversations(),
+          api.getStats(daysRef.current),
+          api.listFaqs(),
+        ]);
+        setConversations(page.items);
+        setStats(nextStats);
+        setFaqs(nextFaqs);
+        lastLoadedDays.current = daysRef.current;
+        setReady(true);
+        setAuthNeeded(false);
+        setToast((current) => (current && current.kind === 'error' ? null : current));
 
-      // flag them as fresh.
-      const newlyWaiting: string[] = [];
-      const nextSnapshot = new Map<string, string>();
-      for (const conversation of page.items) {
-        const previous = statusSnapshot.current.get(conversation.id);
-        if (previous && previous !== 'waiting' && conversation.status === 'waiting') {
-          newlyWaiting.push(conversation.id);
+        // flag them as fresh.
+        const newlyWaiting: string[] = [];
+        const nextSnapshot = new Map<string, string>();
+        for (const conversation of page.items) {
+          const previous = statusSnapshot.current.get(conversation.id);
+          if (previous && previous !== 'waiting' && conversation.status === 'waiting') {
+            newlyWaiting.push(conversation.id);
+          }
+          nextSnapshot.set(conversation.id, conversation.status);
         }
-        nextSnapshot.set(conversation.id, conversation.status);
+        statusSnapshot.current = nextSnapshot;
+        if (newlyWaiting.length > 0) {
+          const now = Date.now();
+          setNewWaiting((prev) => {
+            const next = new Map(prev);
+            for (const id of newlyWaiting) next.set(id, now);
+            return next;
+          });
+        }
+      } catch (error) {
+        handleError(error, () => void reload(false));
+      } finally {
+        setLoading(false);
+        setStatsLoading(false);
       }
-      statusSnapshot.current = nextSnapshot;
-      if (newlyWaiting.length > 0) {
-        const now = Date.now();
-        setNewWaiting((prev) => {
-          const next = new Map(prev);
-          for (const id of newlyWaiting) next.set(id, now);
-          return next;
-        });
-      }
-    } catch (error) {
-      handleError(error, () => void reload(false));
-    } finally {
-      setLoading(false);
-      setStatsLoading(false);
-    }
-  }, [handleError]);
+    },
+    [handleError],
+  );
 
   const refreshHealth = useCallback(async () => {
     setHealthError(null);
@@ -2245,12 +2606,6 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
         const loaded = await api.health();
         if (cancelled) return;
         setHealth(loaded);
-        if (loaded.adminAuthRequired && !getAdminToken()) {
-          setAuthNeeded(true);
-          setLoading(false);
-          setStatsLoading(false);
-          return;
-        }
       } catch (error) {
         if (cancelled) return;
         setHealthError(errorMessage(error));
@@ -2259,16 +2614,24 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
         setStatsLoading(false);
         return;
       }
+      // Load with whatever credentials the browser has (cookie session and/or
+      // legacy admin token). A 401 surfaces the legacy-token prompt through
+      // handleError — session users must never be blocked by the mere presence
+      // of ADMIN_TOKEN on the server, which previously bricked the workspace
+      // for password sessions on every live deployment (and the pilot e2e).
       if (!cancelled) void reload(false);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [reload]);
 
   useEffect(() => {
     if (!ready || lastLoadedDays.current === days) return;
     let cancelled = false;
     setStatsLoading(true);
-    api.getStats(days)
+    api
+      .getStats(days)
       .then((next) => {
         if (!cancelled) {
           setStats(next);
@@ -2281,7 +2644,9 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
       .finally(() => {
         if (!cancelled) setStatsLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [days, ready, handleError, retryToken]);
 
   // Poll faster while anything is waiting in the human queue.
@@ -2414,11 +2779,16 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
     lastBadgeRef.current.waiting = waiting;
   }
 
-  const sourceFaq = source ? faqs.find((faq) => faq.id === source.id) ?? null : null;
+  const sourceFaq = source ? (faqs.find((faq) => faq.id === source.id) ?? null) : null;
 
   const navItems: Array<{ id: Page; label: string; icon: ReactNode; badge?: number }> = [
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} aria-hidden="true" /> },
-    { id: 'conversations', label: 'Conversations', icon: <MessagesSquare size={16} aria-hidden="true" />, badge: waiting },
+    {
+      id: 'conversations',
+      label: 'Conversations',
+      icon: <MessagesSquare size={16} aria-hidden="true" />,
+      badge: waiting,
+    },
     { id: 'knowledge', label: 'Knowledge base', icon: <BookOpen size={16} aria-hidden="true" /> },
     { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={16} aria-hidden="true" /> },
   ];
@@ -2432,7 +2802,9 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
         </div>
 
         <div className="workspace-card">
-          <span className="workspace-avatar" aria-hidden="true">AS</span>
+          <span className="workspace-avatar" aria-hidden="true">
+            AS
+          </span>
           <div className="workspace-meta">
             <div className="workspace-name">Acme Studio</div>
             <div className="workspace-sub">Live workspace</div>
@@ -2452,7 +2824,9 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
               {item.icon}
               <span className="nav-text">{item.label}</span>
               {item.badge ? (
-                <span className={`badge badge-count${item.badge > lastBadgeRef.current[item.id] ? ' pulse' : ''}`}>
+                <span
+                  className={`badge badge-count${item.badge > lastBadgeRef.current[item.id] ? ' pulse' : ''}`}
+                >
                   {item.badge}
                 </span>
               ) : null}
@@ -2482,10 +2856,12 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
 
         <div className="agent-card">
           {session ? (
-            <AccountCard user={session} onSignOut={onSignOut} />
+            <AccountCard user={session} onSignOut={onSignOut} onSignOutAll={onSignOutAll} />
           ) : (
             <>
-              <span className="agent-avatar" aria-hidden="true">WA</span>
+              <span className="agent-avatar" aria-hidden="true">
+                WA
+              </span>
               <div className="workspace-meta">
                 <div className="agent-name">Workspace Admin</div>
                 <div className="agent-role">Active Session</div>
@@ -2495,8 +2871,7 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
         </div>
       </nav>
 
-      <main className="main">
-
+      <main id="main-content" className="main">
         {page === 'overview' ? (
           <OverviewPage
             session={session}
@@ -2544,14 +2919,15 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
         ) : null}
 
         {page === 'settings' ? (
-          <SettingsPage health={health} healthError={healthError} onRefreshHealth={() => void refreshHealth()} />
+          <SettingsPage
+            health={health}
+            healthError={healthError}
+            onRefreshHealth={() => void refreshHealth()}
+          />
         ) : null}
       </main>
 
-      <InstallWidgetModal
-        isOpen={installWidgetOpen}
-        onClose={() => setInstallWidgetOpen(false)}
-      />
+      <InstallWidgetModal isOpen={installWidgetOpen} onClose={() => setInstallWidgetOpen(false)} />
 
       {openId ? (
         <ConversationDrawer
@@ -2568,7 +2944,11 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
       {source ? (
         <Modal
           title={source.title}
-          description={sourceFaq ? `Knowledge base article · ${INTENT_LABEL[sourceFaq.category]}` : 'Knowledge base article'}
+          description={
+            sourceFaq
+              ? `Knowledge base article · ${INTENT_LABEL[sourceFaq.category]}`
+              : 'Knowledge base article'
+          }
           onClose={closeSource}
         >
           <div className="modal-body">
@@ -2577,15 +2957,19 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
                 <CitedAnswer faq={sourceFaq} />
                 {sourceFaq.tags.length > 0 ? (
                   <div className="tag-row">
-                    {sourceFaq.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                    {sourceFaq.tags.map((tag) => (
+                      <span className="tag" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
                 <p className="hint">Last updated {formatDateTime(sourceFaq.updatedAt)}.</p>
               </>
             ) : (
               <p className="note">
-                This article is no longer in the knowledge base, so the original answer cannot be shown. The reply
-                that cited it is still in the transcript above.
+                This article is no longer in the knowledge base, so the original answer cannot be shown. The
+                reply that cited it is still in the transcript above.
               </p>
             )}
           </div>
@@ -2612,12 +2996,14 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
                   onChange={(event) => setAuthDraft(event.target.value)}
                 />
                 <span className="hint">
-                  Stored in this browser tab only (sessionStorage) and sent as the x-admin-token header. Relay never
-                  writes it anywhere else.
+                  Stored in this browser tab only (sessionStorage) and sent as the x-admin-token header. Relay
+                  never writes it anywhere else.
                 </span>
               </label>
               {authError ? (
-                <p className="note" style={{ color: 'var(--danger)' }}>{authError}</p>
+                <p className="note" style={{ color: 'var(--danger)' }}>
+                  {authError}
+                </p>
               ) : null}
             </div>
             <div className="modal-foot">
@@ -2653,7 +3039,8 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
                   retry?.();
                 }}
               >
-                <RefreshCw size={13} aria-hidden="true" />Retry
+                <RefreshCw size={13} aria-hidden="true" />
+                Retry
               </button>
             ) : null}
             <button className="icon-btn" onClick={() => setToast(null)} aria-label="Dismiss message">
@@ -2669,6 +3056,5 @@ function AdminApp({ session, onSignOut, onPreviewChat, onNewConversation }: Admi
 /* ================================================================== *
  * Root
  * ================================================================== */
-
 
 export default AdminApp;

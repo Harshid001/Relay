@@ -5,6 +5,59 @@ All notable changes to Relay are recorded here. Dates are release dates;
 
 ## Unreleased
 
+### Security — production readiness audit fixes (PRD-001…PRD-020)
+
+- OTP / magic-link secrets are no longer written to stdout or structured logs
+  when no mail provider is configured (`server/notify.ts` logs delivery
+  metadata only). Local developers keep the loopback-only
+  `ALLOW_AUTH_DEBUG_CODE` response field, already surfaced in the login UI.
+- Auth throttles now fail closed: a throttle-store outage refuses the attempt
+  with 503 (+ `Retry-After`) and reports via `reportError`, instead of
+  silently disabling brute-force protection. Bulk-traffic limiting stays
+  fail-open for availability but now reports outages too.
+- New per-surface auth budgets: email verify (20/10 min per IP+email), Google
+  login (30/10 min per IP), password change (10/10 min per account).
+- Password change revokes every other session for the account; new
+  `POST /auth/logout-all` revokes all of them. Session cookies are cleared
+  with the same `Secure` attribute they were set with.
+- Production refuses to start without `TRUST_PROXY` (cookie `Secure` flag and
+  client-IP rate limits depend on it); development keeps a warning.
+- `/api/metrics` and `/api/health/system` require an authenticated session;
+  the public `/api/health` liveness probe is unchanged. OpenAPI documents the
+  new auth requirements plus `POST /auth/logout-all` (36 paths total).
+- MongoDB authentication in both compose stacks (root user via
+  `MONGO_ROOT_USER`/`MONGO_ROOT_PASSWORD` in prod, `MONGO_USER`/
+  `MONGO_PASSWORD` in dev); dev mongo binds to loopback only. Backup/restore
+  scripts authenticate from `.env.prod`.
+- Outbound Google/Resend calls carry a 5 s abort timeout so a hung upstream
+  cannot hang sign-in or notifications.
+
+### Added
+
+- Bounded reads everywhere: `GET /faqs`, conversation transcripts,
+  `GET /admin/knowledge-gaps` and `GET /auth/users` accept `limit`/`offset`
+  (shared `parsePagination` helper, covered by unit tests); most-recent-N
+  transcripts stay chronological.
+- Workspace data now loads for cookie-session users when `ADMIN_TOKEN` is set:
+  the dashboard attempts `reload()` first and only shows the legacy-token
+  prompt on 401. Previously the pre-emptive `adminAuthRequired` gate bricked
+  the queue for password sessions on every live deployment (and failed the
+  pilot e2e) — fixed, pilot + a11y green at 9/9 locally.
+- Keyboard containment: shared `useFocusTrap` (Tab cycling + focus return)
+  wired into `Modal` and the conversation drawer; queue tables use real
+  `Open` buttons instead of `tr role=button`; skip link targets every view
+  (login landmark included); rating exposes radiogroup semantics.
+- PWA installability: generated `icon-192/512.png`, maskable icon and
+  `og-image.png` (`backend/scripts/gen-pwa-assets.mjs`), wired into the
+  manifest, touch icon and social meta.
+- Dependency-free load probe (`backend/scripts/load-probe.mjs`): 500×20
+  against public reads measured ~1560 rps, p50 ≈ 10 ms, p95 ≈ 26 ms, zero
+  errors on local hardware.
+- Pre-production backup release gate in both deploy guides (RPO ≤ 24 h,
+  rehearsed restore evidence required), expanded `.env.prod.example`
+  (database auth, caps, account policy, observability, backups), and a
+  `format:check` CI step.
+
 ### Security
 
 - Email OTP / magic-link secrets are never returned unless `ALLOW_AUTH_DEBUG_CODE=true`,
@@ -67,7 +120,7 @@ All notable changes to Relay are recorded here. Dates are release dates;
   recovery for abandoned turn locks.
 - Backend compiles with `tsc` (`npm run build` → `dist/`); Docker and
   `npm start` run `node dist/server/index.js` (no tsx in production).
-- OpenAPI 3.1 reference for all 35 paths at `/api/openapi.json`
+- OpenAPI 3.1 reference at `/api/openapi.json`
   (also enveloped at `/api/v1/openapi.json`).
 - Frontend route splitting: landing entry 292 KB → ~50 KB, vendor chunk
   cached, chat/admin lazy.
@@ -80,12 +133,12 @@ All notable changes to Relay are recorded here. Dates are release dates;
 
 ### Tests
 
-- 37 integration tests (added: helmet headers, OpenAPI shape, CSRF allow/
-  deny, shared limiter 409/429 with `Retry-After`).
+- 14 backend unit tests (validation incl. pagination, plan, config, HTTP,
+  monitoring) run without MongoDB; 16 frontend unit tests (`service-api`).
 - 6 Playwright pilot tests (landing → cited answer → handoff → admin
-  login/reply/resolve), runnable against source or `dist/`.
-- 3 axe accessibility tests; 15 frontend unit tests (`service-api`).
-- Informational `c8` coverage (`npm run test:coverage`).
+  login/reply/resolve), runnable against source or `dist/` (need MongoDB).
+- 3 axe accessibility tests; informational `c8` coverage
+  (`npm run test:coverage`, floor lines 52% / branches 68%).
 
 ### Docs
 

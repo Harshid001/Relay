@@ -26,16 +26,16 @@ function RouteFallback({ label }: { label: string }) {
   return (
     <div className="auth-shell" role="status" aria-live="polite">
       <div className="auth-card" style={{ alignItems: 'center', textAlign: 'center' }}>
-        <div className="loading-block"><Spinner />Loading {label}…</div>
+        <div className="loading-block">
+          <Spinner />
+          Loading {label}…
+        </div>
       </div>
     </div>
   );
 }
 
-type Route =
-  | { view: 'landing' }
-  | { view: 'workspace' }
-  | { view: 'chat'; fresh: boolean };
+type Route = { view: 'landing' } | { view: 'workspace' } | { view: 'chat'; fresh: boolean };
 
 function parseRoute(): Route {
   if (typeof window === 'undefined') return { view: 'landing' };
@@ -66,6 +66,9 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       {route.view === 'chat' ? (
         <Suspense fallback={<RouteFallback label="the chat" />}>
           <CustomerCenter fresh={route.fresh} onExit={() => go('/')} />
@@ -73,10 +76,7 @@ export default function App() {
       ) : route.view === 'workspace' ? (
         <WorkspaceRoot onPreviewChat={() => go('/chat')} onNewConversation={() => go('/chat?new=1')} />
       ) : (
-        <Landing
-          onOpenWorkspace={() => go('/app')}
-          onOpenChat={() => go('/chat')}
-        />
+        <Landing onOpenWorkspace={() => go('/app')} onOpenChat={() => go('/chat')} />
       )}
     </ErrorBoundary>
   );
@@ -87,11 +87,14 @@ export default function App() {
  * signed out, and renders the admin app when a user (or the legacy token
  * path) is available.
  */
-function WorkspaceRoot({ onPreviewChat, onNewConversation }: {
+function WorkspaceRoot({
+  onPreviewChat,
+  onNewConversation,
+}: {
   onPreviewChat: () => void;
   onNewConversation: () => void;
 }) {
-  const { session, signIn, signOut } = useSession();
+  const { session, signIn, signOut, signOutAll } = useSession();
   const [legacyMode, setLegacyMode] = useState(false);
 
   const legacyAvailable = useMemo(() => {
@@ -106,7 +109,10 @@ function WorkspaceRoot({ onPreviewChat, onNewConversation }: {
     return (
       <div className="auth-shell" role="status" aria-live="polite">
         <div className="auth-card" style={{ alignItems: 'center', textAlign: 'center' }}>
-          <div className="loading-block"><Spinner />Checking your session…</div>
+          <div className="loading-block">
+            <Spinner />
+            Checking your session…
+          </div>
         </div>
       </div>
     );
@@ -128,6 +134,7 @@ function WorkspaceRoot({ onPreviewChat, onNewConversation }: {
         <AdminApp
           session={session.status === 'signed-in' ? session.user : null}
           onSignOut={signOut}
+          onSignOutAll={signOutAll}
           onPreviewChat={onPreviewChat}
           onNewConversation={onNewConversation}
         />

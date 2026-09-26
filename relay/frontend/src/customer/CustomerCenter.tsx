@@ -4,18 +4,21 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AlertCircle, Bot, CheckCircle2, Send,
-  Star, UserRound, Users, Wrench,
-} from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Send, Star, UserRound, Users, Wrench } from 'lucide-react';
 import { ApiError, api, customerApi, loadCustomerStore, saveCustomerStore } from '../service-api';
 import type { Conversation, CustomerStore, Faq, Message } from '../service-types';
 import {
-  CitedAnswer, EmptyState, INTENT_LABEL, LogoMark, Modal, Spinner, MessageBubble, lastCustomerQueryRef, errorMessage,
+  CitedAnswer,
+  EmptyState,
+  INTENT_LABEL,
+  LogoMark,
+  Modal,
+  Spinner,
+  MessageBubble,
+  lastCustomerQueryRef,
+  errorMessage,
   formatDateTime,
 } from '../ui/shared';
-
-
 
 function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void }) {
   const [store, setStore] = useState<CustomerStore>(() => loadCustomerStore());
@@ -57,10 +60,7 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
     (async () => {
       setLoading(true);
       try {
-        const [loadedFaqs] = await Promise.all([
-          api.listFaqs(),
-          api.health().catch(() => null),
-        ]);
+        const [loadedFaqs] = await Promise.all([api.listFaqs(), api.health().catch(() => null)]);
         if (cancelled) return;
         setFaqs(loadedFaqs);
 
@@ -86,7 +86,9 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [fresh, commit]);
 
   // While a human owns the thread, poll for their replies.
@@ -180,88 +182,99 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
 
   const pendingSend = useRef<{ conversationId: string; content: string; clientId: string } | null>(null);
 
-  const send = useCallback(async (raw: string) => {
-    const content = raw.trim();
-    if (!content || busy !== null) return;
-    setError(null);
-    setBusy('send');
-    setInput('');
-    /** A new conversation may fail (free cap). Only create once per send. */
-    let createdThisSend = false;
-    pendingOrderId.current = /(\d{3,6})/.exec(content)?.[1] ?? null;
-    // Staged tool phase for typed questions too: an order number plus a status
-    // word means the lookup tool is about to run.
-    const looksLikeOrderLookup = pendingOrderId.current !== null
-      && /\b(where|track|status|arrive|delivery|shipping|shipped|late|stuck)\b/i.test(content);
-    setPhase(looksLikeOrderLookup ? 'tool' : 'answering');
+  const send = useCallback(
+    async (raw: string) => {
+      const content = raw.trim();
+      if (!content || busy !== null) return;
+      setError(null);
+      setBusy('send');
+      setInput('');
+      /** A new conversation may fail (free cap). Only create once per send. */
+      let createdThisSend = false;
+      pendingOrderId.current = /(\d{3,6})/.exec(content)?.[1] ?? null;
+      // Staged tool phase for typed questions too: an order number plus a status
+      // word means the lookup tool is about to run.
+      const looksLikeOrderLookup =
+        pendingOrderId.current !== null &&
+        /\b(where|track|status|arrive|delivery|shipping|shipped|late|stuck)\b/i.test(content);
+      setPhase(looksLikeOrderLookup ? 'tool' : 'answering');
 
-    let active = conversation;
-    let token = tokenFor(active?.id);
-    try {
-      if (!active || !token) {
-        const created = await customerApi.create({});
-        active = created.conversation;
-        token = created.accessToken; // may be null when the free cap blocks creation
+      let active = conversation;
+      let token = tokenFor(active?.id);
+      try {
+        if (!active || !token) {
+          const created = await customerApi.create({});
+          active = created.conversation;
+          token = created.accessToken; // may be null when the free cap blocks creation
+          commit({
+            activeId: active.id,
+            sessions: [
+              { id: active.id, token, title: active.title, createdAt: new Date().toISOString() },
+              ...storeRef.current.sessions.filter((entry) => entry.id !== active!.id),
+            ].slice(0, 12),
+          });
+          setConversation(active);
+          setMessages([]);
+          prevStatusRef.current = undefined;
+          createdThisSend = true;
+        }
+
+        const optimistic: Message = {
+          id: `pending-${Date.now()}`,
+          conversationId: active.id,
+          role: 'user',
+          content,
+          createdAt: new Date().toISOString(),
+          sources: [],
+        };
+        setMessages((prev) => [...prev, optimistic]);
+
+        if (
+          !pendingSend.current ||
+          pendingSend.current.conversationId !== active.id ||
+          pendingSend.current.content !== content
+        ) {
+          pendingSend.current = { conversationId: active.id, content, clientId: crypto.randomUUID() };
+        }
+        const detail = await customerApi.send(active.id, token, content, pendingSend.current.clientId);
+        pendingSend.current = null;
+        setConversation(detail.conversation);
+        setMessages(detail.messages);
+        if (detail.conversation.status === 'waiting') {
+          // The assistant reply in this response already announced the handoff.
+          pendingHandoffAnnounced.current = true;
+        }
+        if (detail.toolEvent?.name === 'lookup_order') {
+          setToolFlash({ orderId: detail.toolEvent.args.orderId, at: Date.now() });
+        }
         commit({
           activeId: active.id,
-          sessions: [
-            { id: active.id, token, title: active.title, createdAt: new Date().toISOString() },
-            ...storeRef.current.sessions.filter((entry) => entry.id !== active!.id),
-          ].slice(0, 12),
+          sessions: storeRef.current.sessions.map((entry) =>
+            entry.id === active!.id ? { ...entry, title: detail.conversation.title } : entry,
+          ),
         });
-        setConversation(active);
-        setMessages([]);
-        prevStatusRef.current = undefined;
-        createdThisSend = true;
+      } catch (caught) {
+        setMessages((prev) => prev.filter((message) => !message.id.startsWith('pending-')));
+        setInput(content);
+        // A 429 from the free-plan cap: reset to the pre-send state so a retry
+        // can go through (or reach a human) once capacity frees up.
+        if (createdThisSend && caught instanceof ApiError && caught.status === 429) {
+          commit({
+            activeId: null,
+            sessions: storeRef.current.sessions.filter((entry) => entry.id !== active!.id),
+          });
+          setConversation(null);
+          setMessages([]);
+        }
+        setError(errorMessage(caught));
+      } finally {
+        setBusy(null);
+        setPhase(null);
+        pendingOrderId.current = null;
       }
-
-      const optimistic: Message = {
-        id: `pending-${Date.now()}`,
-        conversationId: active.id,
-        role: 'user',
-        content,
-        createdAt: new Date().toISOString(),
-        sources: [],
-      };
-      setMessages((prev) => [...prev, optimistic]);
-
-      if (!pendingSend.current || pendingSend.current.conversationId !== active.id || pendingSend.current.content !== content) {
-        pendingSend.current = { conversationId: active.id, content, clientId: crypto.randomUUID() };
-      }
-      const detail = await customerApi.send(active.id, token, content, pendingSend.current.clientId);
-      pendingSend.current = null;
-      setConversation(detail.conversation);
-      setMessages(detail.messages);
-      if (detail.conversation.status === 'waiting') {
-        // The assistant reply in this response already announced the handoff.
-        pendingHandoffAnnounced.current = true;
-      }
-      if (detail.toolEvent?.name === 'lookup_order') {
-        setToolFlash({ orderId: detail.toolEvent.args.orderId, at: Date.now() });
-      }
-      commit({
-        activeId: active.id,
-        sessions: storeRef.current.sessions.map((entry) =>
-          entry.id === active!.id ? { ...entry, title: detail.conversation.title } : entry,
-        ),
-      });
-    } catch (caught) {
-      setMessages((prev) => prev.filter((message) => !message.id.startsWith('pending-')));
-      setInput(content);
-      // A 429 from the free-plan cap: reset to the pre-send state so a retry
-      // can go through (or reach a human) once capacity frees up.
-      if (createdThisSend && caught instanceof ApiError && caught.status === 429) {
-        commit({ activeId: null, sessions: storeRef.current.sessions.filter((entry) => entry.id !== active!.id) });
-        setConversation(null);
-        setMessages([]);
-      }
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(null);
-      setPhase(null);
-      pendingOrderId.current = null;
-    }
-  }, [busy, commit, conversation, tokenFor]);
+    },
+    [busy, commit, conversation, tokenFor],
+  );
 
   const requestHuman = async () => {
     const id = conversation?.id;
@@ -410,37 +423,42 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               </select>
             </div>
           ) : null}
-          <button className="btn btn-outline btn-sm" onClick={startNew}>New conversation</button>
-          <button className="btn btn-ghost btn-sm" onClick={onExit}>Back to workspace</button>
+          <button className="btn btn-outline btn-sm" onClick={startNew}>
+            New conversation
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={onExit}>
+            Back to workspace
+          </button>
         </div>
       </header>
 
-      <main className="customer-grid">
+      <main id="main-content" className="customer-grid">
         <aside className="customer-aside">
           <h1 className="customer-title">A helpful answer is one message away.</h1>
           <p className="page-sub">
-            Ask in your own words. Relay answers from the support knowledge base and shows you the article it used.
+            Ask in your own words. Relay answers from the support knowledge base and shows you the article it
+            used.
           </p>
 
           <div className="row row-wrap" style={{ marginTop: 14 }}>
             <span className="badge badge-ok">
-              <CheckCircle2 size={12} aria-hidden="true" />All systems operational
+              <CheckCircle2 size={12} aria-hidden="true" />
+              All systems operational
             </span>
-            <span className="badge badge-neutral">
-              Live answers
-            </span>
+            <span className="badge badge-neutral">Live answers</span>
           </div>
 
           <p className="note" style={{ marginTop: 18 }}>
             Answers come from the CodeBuddy agent and your support knowledge base.
           </p>
-
-          </aside>
+        </aside>
 
         <section className="chat-panel" aria-label="Support chat">
           <div className="chat-head">
             <div className="row">
-              <span className="stat-icon"><Bot size={17} aria-hidden="true" /></span>
+              <span className="stat-icon">
+                <Bot size={17} aria-hidden="true" />
+              </span>
               <div>
                 <div className="card-title">Relay Assistant</div>
                 <div className="card-sub">Knowledge-powered support</div>
@@ -450,7 +468,10 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
 
           <div className="chat-scroll" ref={scrollRef}>
             {loading ? (
-              <div className="loading-block"><Spinner />Loading your conversation…</div>
+              <div className="loading-block">
+                <Spinner />
+                Loading your conversation…
+              </div>
             ) : messages.length === 0 ? (
               <EmptyState
                 title="No messages yet"
@@ -482,7 +503,11 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
                         </>
                       ) : (
                         <>
-                          <span className="dots" aria-hidden="true"><span /><span /><span /></span>
+                          <span className="dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                          </span>
                           Finding the best answer…
                         </>
                       )}
@@ -498,13 +523,19 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               <div className="toast" role="alert" style={{ marginBottom: 12 }}>
                 <AlertCircle size={16} aria-hidden="true" />
                 <span className="toast-text">{error}</span>
-                <button className="btn btn-ghost btn-sm" onClick={() => setError(null)}>Dismiss</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setError(null)}>
+                  Dismiss
+                </button>
               </div>
             ) : null}
 
             {handoffStage === 'connecting' ? (
               <div className="handoff handoff-connecting">
-                <span className="dots" aria-hidden="true"><span /><span /><span /></span>
+                <span className="dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
                 <span>Connecting you to a human agent…</span>
               </div>
             ) : null}
@@ -513,28 +544,34 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
               <div className="handoff">
                 <Users size={16} aria-hidden="true" />
                 <span>
-                  You are in the human queue. Reason: {conversation?.escalationReason ?? 'Customer requested a human agent'}.
-                  A teammate will reply here — you can keep adding details in the meantime.
+                  You are in the human queue. Reason:{' '}
+                  {conversation?.escalationReason ?? 'Customer requested a human agent'}. A teammate will
+                  reply here — you can keep adding details in the meantime.
                 </span>
               </div>
             ) : null}
 
-
-
             {resolved ? (
               <div className="resolved-note">
                 <span>This conversation is marked resolved. Start a new one if you need anything else.</span>
-                <button className="btn btn-primary btn-sm" onClick={startNew}>New conversation</button>
+                <button className="btn btn-primary btn-sm" onClick={startNew}>
+                  New conversation
+                </button>
               </div>
             ) : (
               <>
                 {canRate && !conversation?.rating ? (
                   <div className="row row-wrap" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
                     <span className="note">How was this answer?</span>
-                    <div className="rating" role="group" aria-label="Rate this conversation">
+                    <div className="rating" role="radiogroup" aria-label="Rate this conversation">
                       {[1, 2, 3, 4, 5].map((score) => (
                         <button
                           key={score}
+                          type="button"
+                          role="radio"
+                          aria-checked="false"
+                          aria-posinset={score}
+                          aria-setsize={5}
                           className="star-btn"
                           disabled={ratingBusy}
                           aria-label={`Rate ${score} out of 5`}
@@ -551,8 +588,6 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
                     Thanks for your feedback — you rated this {conversation.rating} out of 5.
                   </p>
                 ) : null}
-
-
 
                 <div className="composer">
                   <textarea
@@ -578,7 +613,11 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
                         disabled={busy !== null || !conversation || waiting}
                       >
                         <UserRound size={14} aria-hidden="true" />
-                        {waiting ? 'Human requested' : busy === 'escalate' ? 'Requesting…' : 'Request a human'}
+                        {waiting
+                          ? 'Human requested'
+                          : busy === 'escalate'
+                            ? 'Requesting…'
+                            : 'Request a human'}
                       </button>
                       <button
                         className="btn btn-primary btn-sm"
@@ -607,7 +646,11 @@ function CustomerCenter({ fresh, onExit }: { fresh: boolean; onExit: () => void 
             <CitedAnswer faq={source} />
             {source.tags.length > 0 ? (
               <div className="tag-row">
-                {source.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}
+                {source.tags.map((tag) => (
+                  <span className="tag" key={tag}>
+                    {tag}
+                  </span>
+                ))}
               </div>
             ) : null}
             <p className="hint">Last updated {formatDateTime(source.updatedAt)}.</p>

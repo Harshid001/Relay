@@ -40,9 +40,7 @@ export function requestLogging(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const incoming = req.get('x-request-id');
     const requestId =
-      incoming && /^[\w.-]{8,64}$/.test(incoming)
-        ? incoming
-        : crypto.randomUUID().slice(0, 18);
+      incoming && /^[\w.-]{8,64}$/.test(incoming) ? incoming : crypto.randomUUID().slice(0, 18);
 
     req.requestId = requestId;
     res.setHeader('X-Request-Id', requestId);

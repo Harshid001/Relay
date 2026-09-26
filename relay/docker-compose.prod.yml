@@ -13,8 +13,8 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env.prod}
       # Acme DNS challenge via Cloudflare (works even with proxied DNS):
@@ -32,20 +32,21 @@ services:
     restart: unless-stopped
     # Not published: reachable only through Caddy on the docker network.
     expose:
-      - "3000"
+      - '3000'
     environment:
       PORT: 3000
       HOST: 0.0.0.0
-      MONGODB_URI: mongodb://mongo:27017
+      # PRD-007: authenticated URI built from the required MONGO_ROOT_* vars.
+      MONGODB_URI: mongodb://${MONGO_ROOT_USER:?set MONGO_ROOT_USER in .env.prod}:${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env.prod}@mongo:27017
       MONGODB_DB: ${MONGODB_DB:-relay}
       SEED_DEMO: ${SEED_DEMO:-false}
       # Host/Origin allowlist: loopback is always allowed; DOMAIN (plus any
       # extra names in ALLOWED_HOSTS) unlocks public traffic. Set
       # ALLOWED_HOSTS="*" to disable the guard entirely (not recommended).
-      ALLOWED_HOSTS: "${DOMAIN}, ${ALLOWED_HOSTS:-}"
+      ALLOWED_HOSTS: '${DOMAIN}, ${ALLOWED_HOSTS:-}'
       # Security
       ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN in .env.prod}
-      TRUST_PROXY: "1"
+      TRUST_PROXY: '1'
       # Accounts (bootstrap only runs while no users exist)
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?set BOOTSTRAP_ADMIN_EMAIL in .env.prod}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in .env.prod}
@@ -61,7 +62,7 @@ services:
       mongo:
         condition: service_healthy
     healthcheck:
-      test: "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      test: 'node -e "fetch(''http://127.0.0.1:3000/api/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"'
       interval: 30s
       timeout: 5s
       retries: 3
@@ -70,13 +71,19 @@ services:
   mongo:
     image: mongo:8
     restart: unless-stopped
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
     # NOT published: only the docker network can reach it. The VM's security
     # list + iptables should also close 27017 to the internet.
+    # PRD-007: authentication is enforced via the initdb root user. The app,
+    # healthchecks and backup scripts authenticate with these credentials;
+    # nothing connects anonymously, even inside the docker network.
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:?set MONGO_ROOT_USER in .env.prod}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env.prod}
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: "mongosh --quiet --eval 'try { rs.status().ok } catch { rs.initiate().ok }' | grep -q 1"
+      test: "mongosh --quiet -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval 'try { rs.status().ok } catch { rs.initiate().ok }' | grep -q 1"
       interval: 5s
       timeout: 5s
       retries: 12
@@ -85,14 +92,17 @@ services:
   # One-shot: initiates the replica set so transactions work (Atlas parity).
   mongo-init:
     image: mongo:8
-    restart: "no"
+    restart: 'no'
+    environment:
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER:?set MONGO_ROOT_USER in .env.prod}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env.prod}
     depends_on:
       mongo:
         condition: service_healthy
     entrypoint: >
       bash -c '
         sleep 3;
-        mongosh --host mongo --quiet --eval "
+        mongosh --host mongo -u "$$MONGO_ROOT_USER" -p "$$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --quiet --eval "
           try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }
         " && echo "replica set ready"'
 

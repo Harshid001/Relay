@@ -31,7 +31,9 @@ export function initMonitoring(): void {
     tracesSampleRate: Math.min(1, Math.max(0, Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0) || 0)),
   });
   sentryReady = true;
-  log.info('monitoring_sentry_enabled', { environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV });
+  log.info('monitoring_sentry_enabled', {
+    environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+  });
 }
 
 export function monitoringEnabled(): boolean {

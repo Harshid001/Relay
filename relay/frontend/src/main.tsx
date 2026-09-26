@@ -3,7 +3,11 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-document.title = 'relay — support operations';
+// Keep the crawl-visible <title> from index.html ("Relay — Intelligent
+// Customer Service"); per-route titles are set by the views themselves.
+if (!document.title || document.title === 'Vite App') {
+  document.title = 'Relay — Intelligent Customer Service';
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

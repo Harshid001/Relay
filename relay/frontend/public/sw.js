@@ -11,7 +11,10 @@ const SHELL = ['/'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()),
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(SHELL))
+      .then(() => self.skipWaiting()),
   );
 });
 

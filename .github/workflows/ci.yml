@@ -127,6 +127,10 @@ jobs:
         working-directory: relay
         run: npm run lint
 
+      - name: Format check (Prettier)
+        working-directory: relay
+        run: npm run format:check
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -139,6 +143,8 @@ jobs:
           ADMIN_TOKEN: ci-dummy-admin-token
           BOOTSTRAP_ADMIN_EMAIL: ci@example.com
           BOOTSTRAP_ADMIN_PASSWORD: ci-dummy-password
+          MONGO_ROOT_USER: ci-mongo-admin
+          MONGO_ROOT_PASSWORD: ci-dummy-mongo-password
 
       - name: Build production image
         run: docker build -t relay:ci relay
@@ -159,6 +165,7 @@ jobs:
           docker run -d --name relay-ci --network host \
             -e MONGODB_URI=mongodb://127.0.0.1:27017 \
             -e ADMIN_TOKEN=ci-dummy-admin-token \
+            -e TRUST_PROXY=1 \
             relay:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then

@@ -61,8 +61,11 @@ to 60 s for long assistant turns.
    | `MONGODB_MAX_POOL_SIZE` | optional; default `10` on serverless, `20` on VM |
 
 3. **Deploy.** Verify:
-   - Base health: `curl https://<app>.vercel.app/api/health` → `{"status":"ok",…}`
-   - System health: `curl https://<app>.vercel.app/api/health/system` → `{"status":"healthy","components":{…}}`
+    - Base health: `curl https://<app>.vercel.app/api/health` → `{"status":"ok",…}`
+    - System health is authenticated (session cookie): sign in at `/app`, then
+      `curl -b <cookies.txt> https://<app>.vercel.app/api/health/system` →
+      `{"status":"healthy","components":{…}}` — or read it in the workspace,
+      which calls the same endpoint with your session.
    First login provisions nothing extra — the bootstrap admin already exists.
 4. Custom domain: Project → Domains → add it, then **append it to
    `ALLOWED_HOSTS`** and redeploy (unknown hosts get `403 Forbidden host`).
@@ -77,18 +80,22 @@ to 60 s for long assistant turns.
   a shared budget).
 - **Cold starts:** the first request after idle pays the Atlas connect +
   index build (~1–2 s).
-- **Backups:** Atlas M0 has no continuous backups. Either run
-  `mongodump --uri "$MONGODB_URI" --archive --gzip` from your machine, or enable
-  the scheduled workflow: set `BACKUP_ENABLED=true` and the `MONGODB_URI` /
-  `R2_*` secrets, and `.github/workflows/backup.yml` dumps nightly to Cloudflare
-  R2 and rehearses a restore monthly. `scripts/backup-r2.sh` is the VM-side
-  equivalent.
+- **Backups (PRD-006 — do not launch without one of these):** Atlas M0 has
+  no continuous backups. Either run
+  `mongodump --uri "$MONGODB_URI" --archive --gzip` from your machine on a
+  schedule you own, or enable the scheduled workflow: set `BACKUP_ENABLED=true`
+  and the `MONGODB_URI` / `R2_*` secrets, and `.github/workflows/backup.yml`
+  dumps nightly to Cloudflare R2 and rehearses a restore monthly.
+  `scripts/backup-r2.sh` is the VM-side equivalent.
+  The release is not approved until one successful dump **and** one scratch
+  restore are attached as evidence (RPO ≤ 24 h with the nightly workflow).
 
 ## 4 · Rollback (bad deploy)
 
 1. **App:** Vercel dashboard → Deployments → previous production deployment →
    **Promote to Production** (instant, no rebuild). Verify
-   `/api/health` → `status:"ok"` and `/api/health/system` → `"healthy"`.
+   `/api/health` → `status:"ok"` and the workspace system health → `"healthy"`
+   (sign in at `/app`; the endpoint requires a session).
 2. **Preview first:** every push already builds a preview URL — click through
    `/`, `/chat` and `/app` there before promoting anything to production.
 3. **Data:** serverless deploys never migrate schema automatically, so data

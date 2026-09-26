@@ -9,10 +9,12 @@
  *   The TTL doubles as crash recovery — the old in-memory Set leaked a lock
  *   forever when the process died mid-turn.
  *
- * On a store error the limiter fails open (the outage is already reported by
- * the health endpoints; refusing all traffic would turn a Mongo blip into a
- * full outage), while lock acquisition fails closed (a duplicate assistant
- * turn is worse than a 500 the client can retry idempotently).
+ * On a store error the bulk-traffic limiter fails open (refusing all traffic
+ * would turn a Mongo blip into a full outage), but the outage is reported via
+ * server/monitoring.ts so a blip cannot silently disable abuse controls
+ * (PRD-003). Auth gates in server/auth-routes.ts instead fail closed with
+ * 503. Lock acquisition fails closed (a duplicate assistant turn is worse
+ * than a 500 the client can retry idempotently).
  */
 
 import crypto from 'node:crypto';
@@ -20,6 +22,7 @@ import type { Collection, Db } from 'mongodb';
 import type { RequestHandler } from 'express';
 
 import { getDb } from './db.js';
+import { reportError } from './monitoring.js';
 
 interface RateLimitDoc {
   _id: string; // `${bucket}|${windowStart}`
@@ -45,12 +48,8 @@ function turnLocks(): Collection<TurnLockDoc> {
 
 export async function initRateLimitCollections(db: Db): Promise<void> {
   await Promise.all([
-    db
-      .collection<RateLimitDoc>('rate_limits')
-      .createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
-    db
-      .collection<TurnLockDoc>('turn_locks')
-      .createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
+    db.collection<RateLimitDoc>('rate_limits').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
+    db.collection<TurnLockDoc>('turn_locks').createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
   ]);
 }
 
@@ -120,7 +119,8 @@ export function rateLimit(name: string, max: number, windowMs: number): RequestH
       let verdict: RateVerdict;
       try {
         verdict = await checkRateLimit(`${name}|${req.ip ?? 'unknown'}`, max, windowMs);
-      } catch {
+      } catch (error) {
+        void reportError('rate-limit', error, { name });
         next();
         return;
       }

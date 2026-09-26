@@ -88,11 +88,15 @@ test.describe.serial('pilot flow', () => {
     // detail") would otherwise match the same accessible-name substring.
     const drawer = page.getByLabel('Conversation detail', { exact: true });
     await expect(drawer).toBeVisible();
-    await drawer.getByLabel('Reply to the customer').fill('Thanks for reaching out — I have taken over and will sort this out now.');
+    await drawer
+      .getByLabel('Reply to the customer')
+      .fill('Thanks for reaching out — I have taken over and will sort this out now.');
     await drawer.getByRole('button', { name: 'Send reply' }).click();
     await expect(drawer).toContainText('Thanks for reaching out', { timeout: 15000 });
     await drawer.getByRole('button', { name: 'Resolve', exact: true }).click();
-    await expect(drawer.getByRole('button', { name: 'Resolved', exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(drawer.getByRole('button', { name: 'Resolved', exact: true })).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test('security headers ship on the served UI', async ({ request }) => {

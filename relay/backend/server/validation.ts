@@ -19,9 +19,7 @@ export const MAX_TAG_LENGTH = 40;
 export const MAX_CLIENT_ID = 120;
 
 export function asRecord(body: unknown): Record<string, unknown> {
-  return body && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
+  return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 }
 
 export function readRequiredString(value: unknown, max: number): string | null {
@@ -40,9 +38,7 @@ export function readOptionalString(value: unknown, max: number): string | null |
 }
 
 export function parseIntent(value: unknown): Intent | null {
-  return typeof value === 'string' && (INTENTS as string[]).includes(value)
-    ? (value as Intent)
-    : null;
+  return typeof value === 'string' && (INTENTS as string[]).includes(value) ? (value as Intent) : null;
 }
 
 export function parseTags(value: unknown): string[] | null {
@@ -58,4 +54,23 @@ export function parseTags(value: unknown): string[] | null {
     if (!tags.includes(tag)) tags.push(tag);
   }
   return tags;
+}
+
+/**
+ * Parses ?limit=&offset= query params with a default page and a hard max
+ * (PRD-009). Non-numeric or non-positive values fall back to the defaults —
+ * list endpoints stay total by default but can never return an unbounded
+ * result set.
+ */
+export function parsePagination(
+  query: unknown,
+  defaults: { limit: number; max: number },
+): { limit: number; offset: number } {
+  const record = asRecord(query);
+  const limitRaw = Number(record.limit);
+  const offsetRaw = Number(record.offset);
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), defaults.max) : defaults.limit;
+  const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
+  return { limit, offset };
 }

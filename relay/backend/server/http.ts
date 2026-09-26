@@ -66,12 +66,7 @@ export function ok(res: Response, data: unknown, status = 200): void {
 }
 
 /** Standard error envelope (also usable directly by handlers). */
-export function fail(
-  res: Response,
-  status: number,
-  message: string,
-  details?: unknown,
-): void {
+export function fail(res: Response, status: number, message: string, details?: unknown): void {
   res.status(status).json({
     success: false,
     error: { code: codeForStatus(status), message, details },

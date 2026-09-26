@@ -18,7 +18,10 @@ declare global {
     google?: {
       accounts: {
         id: {
-          initialize: (config: { client_id: string; callback: (res: { credential: string }) => void }) => void;
+          initialize: (config: {
+            client_id: string;
+            callback: (res: { credential: string }) => void;
+          }) => void;
           prompt: () => void;
           renderButton: (element: HTMLElement, options: Record<string, unknown>) => void;
         };
@@ -37,15 +40,14 @@ function requireSignedInUser(response: { user: SessionUser | null }): SessionUse
 }
 
 export type SessionState =
-  | { status: 'loading' }
-  | { status: 'signed-out' }
-  | { status: 'signed-in'; user: SessionUser };
+  { status: 'loading' } | { status: 'signed-out' } | { status: 'signed-in'; user: SessionUser };
 
 /** Resolves the cookie session once on mount. */
 export function useSession(): {
   session: SessionState;
   signIn: (user: SessionUser) => void;
   signOut: () => Promise<void>;
+  signOutAll: () => Promise<void>;
 } {
   const [session, setSession] = useState<SessionState>({ status: 'loading' });
 
@@ -77,7 +79,17 @@ export function useSession(): {
     setSession({ status: 'signed-out' });
   }, []);
 
-  return { session, signIn, signOut };
+  // PRD-004: ends every session for the account (stolen-session escape hatch).
+  const signOutAll = useCallback(async () => {
+    try {
+      await authApi.logoutAll();
+    } catch {
+      /* clearing locally regardless */
+    }
+    setSession({ status: 'signed-out' });
+  }, []);
+
+  return { session, signIn, signOut, signOutAll };
 }
 
 export function LoginPage({
@@ -102,10 +114,15 @@ export function LoginPage({
   // Check for configuration on mount
   useEffect(() => {
     let cancelled = false;
-    authApi.getConfig().then((cfg) => {
-      if (!cancelled) setGoogleClientId(cfg.googleClientId);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    authApi
+      .getConfig()
+      .then((cfg) => {
+        if (!cancelled) setGoogleClientId(cfg.googleClientId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Check for magic link verify_token in URL query params on mount
@@ -117,7 +134,8 @@ export function LoginPage({
     if (verifyToken && paramEmail) {
       setBusy(true);
       setError(null);
-      authApi.verifyEmail(paramEmail, undefined, verifyToken)
+      authApi
+        .verifyEmail(paramEmail, undefined, verifyToken)
         .then((response) => {
           const user = requireSignedInUser(response);
           const cleanUrl = window.location.pathname;
@@ -147,7 +165,8 @@ export function LoginPage({
           callback: (response: { credential: string }) => {
             setBusy(true);
             setError(null);
-            authApi.loginWithGoogle(response.credential)
+            authApi
+              .loginWithGoogle(response.credential)
               .then((result) => onLoggedIn(requireSignedInUser(result)))
               .catch((err) => {
                 setError(err instanceof ApiError ? err.message : 'Google sign-in failed.');
@@ -163,7 +182,9 @@ export function LoginPage({
   const handleGoogleClick = () => {
     setError(null);
     if (!googleClientId) {
-      setError('Google Sign-In requires GOOGLE_CLIENT_ID in your environment variables. Sign in with Email Verification below.');
+      setError(
+        'Google Sign-In requires GOOGLE_CLIENT_ID in your environment variables. Sign in with Email Verification below.',
+      );
       return;
     }
     if (window.google?.accounts?.id) {
@@ -244,15 +265,12 @@ export function LoginPage({
   };
 
   return (
-    <div className="auth-shell" role="main">
+    <div className="auth-shell" role="main" id="main-content">
       <div className="auth-card">
         <div className="auth-brand">
           <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
             <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="var(--brand, #4f46e5)" />
-            <path
-              d="M9 20.5 16 9l7 11.5h-4.2L16 15.8l-2.8 4.7H9Z"
-              fill="#fff"
-            />
+            <path d="M9 20.5 16 9l7 11.5h-4.2L16 15.8l-2.8 4.7H9Z" fill="#fff" />
           </svg>
           <span className="brand-word">relay</span>
         </div>
@@ -268,10 +286,22 @@ export function LoginPage({
           aria-label="Continue with Google"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+            <path
+              fill="#4285F4"
+              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+            />
           </svg>
           Continue with Google
         </button>
@@ -285,7 +315,10 @@ export function LoginPage({
           <button
             type="button"
             className={`auth-tab${tab === 'email-code' ? ' active' : ''}`}
-            onClick={() => { setTab('email-code'); setError(null); }}
+            onClick={() => {
+              setTab('email-code');
+              setError(null);
+            }}
             role="tab"
             aria-selected={tab === 'email-code'}
           >
@@ -294,7 +327,10 @@ export function LoginPage({
           <button
             type="button"
             className={`auth-tab${tab === 'password' ? ' active' : ''}`}
-            onClick={() => { setTab('password'); setError(null); }}
+            onClick={() => {
+              setTab('password');
+              setError(null);
+            }}
             role="tab"
             aria-selected={tab === 'password'}
           >
@@ -326,26 +362,54 @@ export function LoginPage({
               ) : null}
 
               <button className="btn btn-primary auth-submit" type="submit" disabled={busy}>
-                {busy ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <Mail size={15} aria-hidden="true" />}
+                {busy ? (
+                  <Loader2 size={15} className="spin" aria-hidden="true" />
+                ) : (
+                  <Mail size={15} aria-hidden="true" />
+                )}
                 Send verification code
               </button>
             </form>
           ) : (
             <form onSubmit={handleVerifyCode} noValidate>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 13, color: 'var(--muted)' }}>Signing in as <strong>{email}</strong></span>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 6,
+                }}
+              >
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                  Signing in as <strong>{email}</strong>
+                </span>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
                   style={{ padding: '2px 6px', fontSize: 12 }}
-                  onClick={() => { setStep('input'); setCode(''); setError(null); setInfo(null); }}
+                  onClick={() => {
+                    setStep('input');
+                    setCode('');
+                    setError(null);
+                    setInfo(null);
+                  }}
                 >
                   Change
                 </button>
               </div>
 
               {info ? (
-                <p className="note" style={{ color: 'var(--primary, #4f46e5)', background: 'rgba(79, 70, 229, 0.08)', padding: '8px 12px', borderRadius: 8, margin: '6px 0 12px', fontSize: 12.5 }}>
+                <p
+                  className="note"
+                  style={{
+                    color: 'var(--primary, #4f46e5)',
+                    background: 'rgba(79, 70, 229, 0.08)',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    margin: '6px 0 12px',
+                    fontSize: 12.5,
+                  }}
+                >
                   {info}
                 </p>
               ) : null}
@@ -372,8 +436,16 @@ export function LoginPage({
                 </p>
               ) : null}
 
-              <button className="btn btn-primary auth-submit" type="submit" disabled={busy || code.length < 6}>
-                {busy ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
+              <button
+                className="btn btn-primary auth-submit"
+                type="submit"
+                disabled={busy || code.length < 6}
+              >
+                {busy ? (
+                  <Loader2 size={15} className="spin" aria-hidden="true" />
+                ) : (
+                  <ShieldCheck size={15} aria-hidden="true" />
+                )}
                 Verify &amp; Sign in
               </button>
 
@@ -424,7 +496,11 @@ export function LoginPage({
             ) : null}
 
             <button className="btn btn-primary auth-submit" type="submit" disabled={busy}>
-              {busy ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
+              {busy ? (
+                <Loader2 size={15} className="spin" aria-hidden="true" />
+              ) : (
+                <ShieldCheck size={15} aria-hidden="true" />
+              )}
               Sign in with password
             </button>
           </form>
@@ -440,8 +516,16 @@ export function LoginPage({
   );
 }
 
-/** Sidebar account card showing the signed-in user with a sign-out action. */
-export function AccountCard({ user, onSignOut }: { user: SessionUser; onSignOut: () => void }) {
+/** Sidebar account card showing the signed-in user with sign-out actions. */
+export function AccountCard({
+  user,
+  onSignOut,
+  onSignOutAll,
+}: {
+  user: SessionUser;
+  onSignOut: () => void;
+  onSignOutAll?: () => void;
+}) {
   const initials = user.name
     .split(/\s+/)
     .map((part) => part[0])
@@ -452,7 +536,9 @@ export function AccountCard({ user, onSignOut }: { user: SessionUser; onSignOut:
 
   return (
     <div className="agent-card">
-      <span className="agent-avatar" aria-hidden="true">{initials || '?'}</span>
+      <span className="agent-avatar" aria-hidden="true">
+        {initials || '?'}
+      </span>
       <div className="workspace-meta">
         <div className="agent-name">{user.name}</div>
         <div className="agent-role">{user.role === 'admin' ? 'Administrator' : 'Support agent'}</div>
@@ -466,6 +552,17 @@ export function AccountCard({ user, onSignOut }: { user: SessionUser; onSignOut:
       >
         <LogOut size={14} aria-hidden="true" />
       </button>
+      {onSignOutAll && (
+        <button
+          type="button"
+          className="icon-btn"
+          title="Sign out of all devices (ends every session for this account)"
+          aria-label="Sign out of all devices"
+          onClick={() => void onSignOutAll()}
+        >
+          <ShieldCheck size={14} aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }

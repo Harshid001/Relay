@@ -47,7 +47,6 @@ export interface AgentTurnResult {
   toolCall?: { name: 'lookup_order'; args: { orderId: string } } | null;
 }
 
-
 /* ------------------------------------------------------------------ *
  * Customer facing copy
  * ------------------------------------------------------------------ */
@@ -145,14 +144,10 @@ Respond with a single JSON object and nothing else:
 {"reply": "<customer facing message>", "intent": "refund" | "order" | "technical" | "general", "escalate": true | false, "used_order_lookup": true | false}`;
 
 function renderKnowledgeBase(faqs: FaqRecord[], orderContext: string | null): string {
-  const base = faqs.length === 0
-    ? 'No matching knowledge base entries were found for this message.'
-    : faqs
-      .map(
-        (faq) =>
-          `[${faq.id}] (${faq.category}) ${faq.title}\n${faq.answer}`,
-      )
-      .join('\n\n');
+  const base =
+    faqs.length === 0
+      ? 'No matching knowledge base entries were found for this message.'
+      : faqs.map((faq) => `[${faq.id}] (${faq.category}) ${faq.title}\n${faq.answer}`).join('\n\n');
   if (!orderContext) return base;
   return `${base}\n\n<order_lookup>\n${orderContext}\n</order_lookup>`;
 }
@@ -163,9 +158,10 @@ function renderHistory(history: TurnHistoryItem[]): string {
   return relevant
     .map((item) => {
       const label = item.role === 'user' ? 'customer' : item.role === 'human' ? 'human_agent' : 'assistant';
-      const content = item.content.length > MAX_HISTORY_CHARS
-        ? `${item.content.slice(0, MAX_HISTORY_CHARS)}\u2026`
-        : item.content;
+      const content =
+        item.content.length > MAX_HISTORY_CHARS
+          ? `${item.content.slice(0, MAX_HISTORY_CHARS)}\u2026`
+          : item.content;
       return `${label}: ${content}`;
     })
     .join('\n');
@@ -264,9 +260,10 @@ export function parseAgentReply(raw: string): ParsedAgentReply | null {
   const reply = typeof object.reply === 'string' ? object.reply.trim() : '';
   if (!reply) return null;
 
-  const intent = typeof object.intent === 'string' && INTENTS.includes(object.intent as Intent)
-    ? (object.intent as Intent)
-    : 'general';
+  const intent =
+    typeof object.intent === 'string' && INTENTS.includes(object.intent as Intent)
+      ? (object.intent as Intent)
+      : 'general';
 
   return {
     reply: reply.slice(0, 4000),
@@ -304,9 +301,10 @@ export async function generateLiveTurn(input: LiveTurnInput): Promise<AgentTurnR
   // Simulated tool call: when the message names a known mock order, its live
   // status is resolved here and handed to the model as trusted context.
   const orderLookup = lookupOrderDecision(input.userText);
-  const order = orderLookup.found && orderLookup.orderId && orderLookup.wantsStatus
-    ? findOrderById(orderLookup.orderId)
-    : undefined;
+  const order =
+    orderLookup.found && orderLookup.orderId && orderLookup.wantsStatus
+      ? findOrderById(orderLookup.orderId)
+      : undefined;
   const orderContext = order ? orderStatusSentence(order) : null;
   const sdk = await loadSdk();
 
@@ -384,7 +382,8 @@ export async function generateLiveTurn(input: LiveTurnInput): Promise<AgentTurnR
       }
 
       if (message.type === 'result') {
-        if (message.subtype && message.subtype !== 'success') throw new Error('CodeBuddy request did not complete successfully');
+        if (message.subtype && message.subtype !== 'success')
+          throw new Error('CodeBuddy request did not complete successfully');
         if (typeof message.session_id === 'string') sessionId = message.session_id;
         if (!collected && typeof message.result === 'string') collected = message.result;
       }
@@ -411,9 +410,7 @@ export async function generateLiveTurn(input: LiveTurnInput): Promise<AgentTurnR
       confidence: escalated ? 'low' : 'high',
       provider: 'codebuddy',
       sdkSessionId: sessionId,
-      toolCall: order && usedOrderLookup
-        ? { name: 'lookup_order', args: { orderId: order.orderId } }
-        : null,
+      toolCall: order && usedOrderLookup ? { name: 'lookup_order', args: { orderId: order.orderId } } : null,
     };
   } finally {
     clearTimeout(timer);

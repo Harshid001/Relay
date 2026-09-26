@@ -3,6 +3,7 @@
  *
  *   POST /api/auth/login      { email, password } → session cookie
  *   POST /api/auth/logout     clears the session
+ *   POST /api/auth/logout-all revokes every session for the account
  *   GET  /api/auth/me         current user (null when signed out)
  *   GET  /api/auth/users      admin: list accounts
  *   POST /api/auth/users      admin: create an account (invite flow)
@@ -18,7 +19,9 @@ import type { Request, RequestHandler, Response } from 'express';
 
 import * as auth from './auth.js';
 import { audit } from './auth.js';
+import { reportError } from './monitoring.js';
 import * as rateLimiters from './ratelimit.js';
+import { parsePagination } from './validation.js';
 import { sendVerificationEmail } from './notify.js';
 
 export const authRouter = Router();
@@ -29,64 +32,131 @@ const MAX_NAME = 80;
 /**
  * Auth throttles are stored in MongoDB (server/ratelimit.ts) rather than
  * process memory, so they hold across serverless instances and restarts
- * exactly like the general API rate limiter. Both fail open on a store error:
- * the outage is already surfaced by /api/health, and refusing every sign-in
- * would turn a database blip into a lockout.
+ * exactly like the general API rate limiter.
+ *
+ * Unlike the general API limiter — which fails open to preserve availability
+ * during a store outage — auth gates FAIL CLOSED (PRD-003): on a store error
+ * the attempt is refused with 503 and the outage is reported. A database
+ * blip must never silently disable brute-force protection.
  */
 const EMAIL_CODE_WINDOW_MS = 60_000;
 const LOGIN_WINDOW_MS = 10 * 60_000;
 const LOGIN_MAX_FAILURES = 8;
+// PRD-005: every credential-guessing surface gets its own budget.
+const VERIFY_WINDOW_MS = 10 * 60_000;
+const VERIFY_MAX_ATTEMPTS = 20;
+const GOOGLE_WINDOW_MS = 10 * 60_000;
+const GOOGLE_MAX_ATTEMPTS = 30;
+const PASSWORD_WINDOW_MS = 10 * 60_000;
+const PASSWORD_MAX_ATTEMPTS = 10;
 
-async function emailThrottle(email: string): Promise<boolean> {
+/** 503 when the throttle store itself is unavailable (fail closed). */
+function throttleUnavailable(res: Response): void {
+  res.setHeader('Retry-After', '60');
+  res.status(503).json({ error: 'Authentication service is temporarily unavailable. Try again shortly.' });
+}
+
+async function reportThrottleOutage(key: string, error: unknown): Promise<void> {
   try {
-    const count = await rateLimiters.readCounter(`emailcode|${email}`, EMAIL_CODE_WINDOW_MS);
-    if (count >= 1) return false;
-    await rateLimiters.bumpCounter(`emailcode|${email}`, EMAIL_CODE_WINDOW_MS);
+    await reportError('auth-throttle', error, { key });
   } catch {
-    /* fail open */
+    /* reporting must never break the auth path */
+  }
+}
+
+/**
+ * Shared gate: refuses with 429 once the budget for `key` is spent, or 503
+ * when the counter store is unreachable. Returns true when the attempt may
+ * proceed. Callers record the outcome with recordThrottleHit/clearThrottle.
+ */
+async function throttleGate(
+  res: Response,
+  key: string,
+  max: number,
+  windowMs: number,
+  message: string,
+): Promise<boolean> {
+  let count: number;
+  try {
+    count = await rateLimiters.readCounter(key, windowMs);
+  } catch (error) {
+    await reportThrottleOutage(key, error);
+    throttleUnavailable(res);
+    return false;
+  }
+  if (count >= max) {
+    res.setHeader('Retry-After', '60');
+    res.status(429).json({ error: message });
+    return false;
   }
   return true;
 }
 
-function attemptKey(req: Request, email: string): string {
+/** Records a failed attempt; a store outage is reported but never blocks. */
+async function recordThrottleHit(key: string, windowMs: number): Promise<void> {
+  try {
+    await rateLimiters.bumpCounter(key, windowMs);
+  } catch (error) {
+    await reportThrottleOutage(key, error);
+  }
+}
+
+/** Clears the budget after a successful attempt; never blocks on outage. */
+async function clearThrottle(key: string, windowMs: number): Promise<void> {
+  try {
+    await rateLimiters.resetCounter(key, windowMs);
+  } catch (error) {
+    await reportThrottleOutage(key, error);
+  }
+}
+
+function loginKey(req: Request, email: string): string {
   return `login|${req.ip ?? 'unknown'}|${email.trim().toLowerCase()}`;
+}
+
+async function emailThrottle(req: Request, res: Response, email: string): Promise<boolean> {
+  const key = `emailcode|${email}`;
+  if (
+    !(await throttleGate(
+      res,
+      key,
+      1,
+      EMAIL_CODE_WINDOW_MS,
+      'Please wait a minute before requesting another verification code.',
+    ))
+  )
+    return false;
+  try {
+    await rateLimiters.bumpCounter(key, EMAIL_CODE_WINDOW_MS);
+  } catch (error) {
+    await reportThrottleOutage(key, error);
+    throttleUnavailable(res);
+    return false;
+  }
+  return true;
 }
 
 /** Blocks a sign-in attempt once the failure budget for IP+email is spent. */
 async function loginThrottle(req: Request, res: Response, email: string): Promise<boolean> {
-  try {
-    const count = await rateLimiters.readCounter(attemptKey(req, email), LOGIN_WINDOW_MS);
-    if (count >= LOGIN_MAX_FAILURES) {
-      res.setHeader('Retry-After', '60');
-      res.status(429).json({ error: 'Too many sign-in attempts. Try again shortly.' });
-      return false;
-    }
-  } catch {
-    /* fail open */
-  }
-  return true;
+  return throttleGate(
+    res,
+    loginKey(req, email),
+    LOGIN_MAX_FAILURES,
+    LOGIN_WINDOW_MS,
+    'Too many sign-in attempts. Try again shortly.',
+  );
 }
 
 async function recordFailure(req: Request, email: string): Promise<void> {
-  try {
-    await rateLimiters.bumpCounter(attemptKey(req, email), LOGIN_WINDOW_MS);
-  } catch {
-    /* fail open */
-  }
+  await recordThrottleHit(loginKey(req, email), LOGIN_WINDOW_MS);
 }
 
 async function clearFailures(req: Request, email: string): Promise<void> {
-  try {
-    await rateLimiters.resetCounter(attemptKey(req, email), LOGIN_WINDOW_MS);
-  } catch {
-    /* fail open */
-  }
+  await clearThrottle(loginKey(req, email), LOGIN_WINDOW_MS);
 }
 
 function readBody(body: unknown): Record<string, unknown> {
-  return body && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
+  return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
 }
 
 function cleanEmail(value: unknown): string | null {
@@ -145,14 +215,31 @@ authRouter.post(
 authRouter.post(
   '/logout',
   wrap(async (req, res) => {
-    const token = req.get('cookie')?.split(';').find((part) => part.trim().startsWith(`${auth.SESSION_COOKIE}=`));
+    const token = req
+      .get('cookie')
+      ?.split(';')
+      .find((part) => part.trim().startsWith(`${auth.SESSION_COOKIE}=`));
     if (token) {
       const raw = decodeURIComponent(token.split('=').slice(1).join('='));
       await auth.destroySession(raw);
     }
-    auth.clearSessionCookie(res);
+    auth.clearSessionCookie(req, res);
     if (req.user) await audit(req, 'auth.logout', req.user.email);
     res.json({ ok: true });
+  }),
+);
+
+authRouter.post(
+  '/logout-all',
+  auth.requireAuth,
+  wrap(async (req, res) => {
+    // PRD-004: revokes every session for this account, including the current
+    // one — the escape hatch when a session may be compromised.
+    if (!req.user) return;
+    const revoked = await auth.destroyUserSessions(req.user.id);
+    auth.clearSessionCookie(req, res);
+    await audit(req, 'auth.logout_all', req.user.email, { revoked });
+    res.json({ ok: true, revoked });
   }),
 );
 
@@ -190,15 +277,15 @@ authRouter.post(
       return;
     }
 
-    if (!(await emailThrottle(email))) {
-      res.status(429).json({ error: 'Please wait a minute before requesting another verification code.' });
-      return;
-    }
+    if (!(await emailThrottle(req, res, email))) return;
 
     const { code, token } = await auth.createEmailVerification(email);
 
     // Build magic link for browser convenience
-    const origin = (req.get('origin') ?? `${req.protocol}://${req.get('host') ?? '127.0.0.1:3000'}`).replace(/\/+$/, '');
+    const origin = (req.get('origin') ?? `${req.protocol}://${req.get('host') ?? '127.0.0.1:3000'}`).replace(
+      /\/+$/,
+      '',
+    );
     const magicLink = `${origin}/app?verify_token=${token}&email=${encodeURIComponent(email)}`;
 
     await sendVerificationEmail(email, code, magicLink);
@@ -233,6 +320,21 @@ authRouter.post(
       return;
     }
 
+    // PRD-005: the per-code 5-guess delete (server/auth.ts) is not enough on
+    // its own — fresh codes can be requested every minute — so guess attempts
+    // are additionally budgeted per IP+email.
+    const verifyKey = `verify|${req.ip ?? 'unknown'}|${email}`;
+    if (
+      !(await throttleGate(
+        res,
+        verifyKey,
+        VERIFY_MAX_ATTEMPTS,
+        VERIFY_WINDOW_MS,
+        'Too many verification attempts. Try again shortly.',
+      ))
+    )
+      return;
+
     let verified = false;
     if (token) {
       const tokenEmail = await auth.verifyEmailToken(token);
@@ -245,10 +347,12 @@ authRouter.post(
     }
 
     if (!verified) {
+      await recordThrottleHit(verifyKey, VERIFY_WINDOW_MS);
       await audit(req, 'auth.email_verify_failed', email);
       res.status(401).json({ error: 'Invalid or expired verification code.' });
       return;
     }
+    await clearThrottle(verifyKey, VERIFY_WINDOW_MS);
 
     const user = await auth.findOrCreateUserByEmail(email);
     const session = await auth.createSession(user.id, req.get('user-agent') ?? null);
@@ -268,11 +372,27 @@ authRouter.post(
       return;
     }
 
+    // PRD-005: each attempt costs an outbound Google verification call, so
+    // the endpoint is budgeted per IP like the other auth gates.
+    const googleKey = `google|${req.ip ?? 'unknown'}`;
+    if (
+      !(await throttleGate(
+        res,
+        googleKey,
+        GOOGLE_MAX_ATTEMPTS,
+        GOOGLE_WINDOW_MS,
+        'Too many sign-in attempts. Try again shortly.',
+      ))
+    )
+      return;
+
     const googleUser = await auth.verifyGoogleIdToken(credential);
     if (!googleUser || !googleUser.email) {
+      await recordThrottleHit(googleKey, GOOGLE_WINDOW_MS);
       res.status(401).json({ error: 'Google authentication failed or email unverified.' });
       return;
     }
+    await clearThrottle(googleKey, GOOGLE_WINDOW_MS);
 
     const user = await auth.findOrCreateUserByEmail(googleUser.email, googleUser.name);
     const session = await auth.createSession(user.id, req.get('user-agent') ?? null);
@@ -285,8 +405,10 @@ authRouter.post(
 authRouter.get(
   '/users',
   auth.requireRole('admin'),
-  wrap(async (_req, res) => {
-    res.json(await auth.listUsers());
+  wrap(async (req, res) => {
+    // PRD-009: previously unsliced.
+    const { limit, offset } = parsePagination(req.query, { limit: 200, max: 500 });
+    res.json(await auth.listUsers({ limit, offset }));
   }),
 );
 
@@ -361,11 +483,31 @@ authRouter.post(
       return;
     }
     if (!req.user) return;
+    // PRD-005: password guessing against an authenticated session is still
+    // budgeted per account, so a stolen session cannot be used to probe the
+    // current password without limit.
+    const passwordKey = `password|${req.user.id}`;
+    if (
+      !(await throttleGate(
+        res,
+        passwordKey,
+        PASSWORD_MAX_ATTEMPTS,
+        PASSWORD_WINDOW_MS,
+        'Too many password attempts. Try again shortly.',
+      ))
+    )
+      return;
     const changed = await auth.changePassword(req.user.id, current, next);
     if (!changed) {
+      await recordThrottleHit(passwordKey, PASSWORD_WINDOW_MS);
       res.status(400).json({ error: 'Current password is incorrect.' });
       return;
     }
+    await clearThrottle(passwordKey, PASSWORD_WINDOW_MS);
+    // PRD-004: a password change ends every other session for this account so
+    // a stolen session does not survive the victim's reset. The session that
+    // performed the change stays valid.
+    await auth.destroyUserSessions(req.user.id, auth.sessionTokenFromCookie(req) ?? undefined);
     await audit(req, 'auth.password_changed', req.user.email);
     res.json({ ok: true });
   }),

@@ -22,9 +22,7 @@ import { log } from './logger.js';
 import { notifyOnEvent } from './notify.js';
 import { telemetry } from './telemetry.js';
 
-export type WorkspaceEvent =
-  | { type: 'conversation'; id: string; status: string | null }
-  | { type: 'faq' };
+export type WorkspaceEvent = { type: 'conversation'; id: string; status: string | null } | { type: 'faq' };
 
 interface Client {
   id: number;

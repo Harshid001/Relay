@@ -177,6 +177,19 @@ describe('CSRF attachment', () => {
     await authApi.logout().catch(() => undefined);
     expect(headersOf(1)['x-csrf-token']).toBe('tok-me');
   });
+
+  it('logout-all hits /api/auth/logout-all with CSRF and clears the token', async () => {
+    setCsrfToken('csrf-all');
+    nextBody = { ok: true, revoked: 2 };
+    const result = await authApi.logoutAll();
+    expect(result).toEqual({ ok: true, revoked: 2 });
+    expect(calls[0].url).toBe('/api/auth/logout-all');
+    expect(headersOf(0)['x-csrf-token']).toBe('csrf-all');
+    // Cleared: the next mutation carries no token.
+    nextBody = { ok: true };
+    await authApi.logout().catch(() => undefined);
+    expect(headersOf(1)['x-csrf-token']).toBeUndefined();
+  });
 });
 
 describe('customer session persistence', () => {

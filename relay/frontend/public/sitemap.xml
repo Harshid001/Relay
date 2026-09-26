@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- PRD-016: <loc> must be absolute. Replace relay.yourdomain.com with the
+     production DOMAIN before launch (see DEPLOY-OCI.md hardening checklist). -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>/</loc>
+    <loc>https://relay.yourdomain.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>/chat</loc>
+    <loc>https://relay.yourdomain.com/chat</loc>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>/app</loc>
+    <loc>https://relay.yourdomain.com/app</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>

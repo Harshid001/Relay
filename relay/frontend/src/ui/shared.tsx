@@ -6,10 +6,26 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent, ReactNode } from 'react';
+import type { MouseEvent, ReactNode, RefObject } from 'react';
 import {
-  AlertCircle, BookOpen, Bot, Check, CheckCircle2, Clock, ExternalLink,
-  Inbox, Loader2, MessagesSquare, ShieldCheck, Sparkles, Star, ThumbsDown, ThumbsUp, Users, Wrench, X,
+  AlertCircle,
+  BookOpen,
+  Bot,
+  Check,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  Inbox,
+  Loader2,
+  MessagesSquare,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  ThumbsDown,
+  ThumbsUp,
+  Users,
+  Wrench,
+  X,
 } from 'lucide-react';
 
 import { ApiError } from '../service-api';
@@ -79,7 +95,10 @@ export function formatDateTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
   return new Intl.DateTimeFormat('en-US', {
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   }).format(date);
 }
 
@@ -105,7 +124,9 @@ export function currentGreeting(): string {
 
 export function todayLabel(): string {
   return new Intl.DateTimeFormat('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
   }).format(new Date());
 }
 
@@ -149,8 +170,17 @@ export function CitedAnswer({ faq }: { faq: Faq }) {
     );
   }, [faq.answer, query]);
 
-  if (!parts) return <p className="faq-answer" style={{ marginTop: 0 }}>{faq.answer}</p>;
-  return <p className="faq-answer" style={{ marginTop: 0 }}>{parts}</p>;
+  if (!parts)
+    return (
+      <p className="faq-answer" style={{ marginTop: 0 }}>
+        {faq.answer}
+      </p>
+    );
+  return (
+    <p className="faq-answer" style={{ marginTop: 0 }}>
+      {parts}
+    </p>
+  );
 }
 
 /** Shared query state so both workspace and customer modals can highlight. */
@@ -164,9 +194,39 @@ export function flattenForHighlight(text: string): string[] {
 }
 
 export const STOP_WORDS_HIGHLIGHT = [
-  'the', 'and', 'for', 'with', 'that', 'this', 'have', 'has', 'was', 'were', 'are',
-  'you', 'your', 'our', 'their', 'from', 'what', 'when', 'where', 'how', 'why', 'who',
-  'can', 'could', 'would', 'should', 'will', 'does', 'did', 'not', 'but', 'its', 'it\'s',
+  'the',
+  'and',
+  'for',
+  'with',
+  'that',
+  'this',
+  'have',
+  'has',
+  'was',
+  'were',
+  'are',
+  'you',
+  'your',
+  'our',
+  'their',
+  'from',
+  'what',
+  'when',
+  'where',
+  'how',
+  'why',
+  'who',
+  'can',
+  'could',
+  'would',
+  'should',
+  'will',
+  'does',
+  'did',
+  'not',
+  'but',
+  'its',
+  "it's",
 ];
 
 export function smoothPath(points: Array<[number, number]>): string {
@@ -245,8 +305,49 @@ interface ModalProps {
   wide?: boolean;
 }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keeps Tab / Shift+Tab cycling inside the referenced dialog while mounted
+ * and restores focus to the previously focused element on unmount (PRD-017).
+ * Pair with initial focus on the panel (or its first control) on mount.
+ */
+export function useFocusTrap(ref: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+        (el) => el.getClientRects().length > 0,
+      );
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      previouslyFocused?.focus?.();
+    };
+  }, [ref]);
+}
+
 export function Modal({ title, description, onClose, children, footer, wide = false }: ModalProps) {
   const panel = useRef<HTMLDivElement>(null);
+  useFocusTrap(panel);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -378,7 +479,14 @@ export function VolumeChart({ data }: { data: VolumePoint[] }) {
 
         {aiArea ? <path d={aiArea} fill="url(#relay-ai-fill)" /> : null}
         <path d={smoothPath(aiPoints)} fill="none" stroke="#306645" strokeWidth="2.4" strokeLinecap="round" />
-        <path d={humanLine} fill="none" stroke="#b7d95f" strokeWidth="2.2" strokeLinecap="round" strokeDasharray="5 4" />
+        <path
+          d={humanLine}
+          fill="none"
+          stroke="#b7d95f"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeDasharray="5 4"
+        />
 
         {hover !== null ? (
           <g>
@@ -390,8 +498,22 @@ export function VolumeChart({ data }: { data: VolumePoint[] }) {
               stroke="#d5dbd1"
               strokeWidth="1"
             />
-            <circle cx={x(hover)} cy={y(data[hover].ai)} r="4" fill="#306645" stroke="#fff" strokeWidth="1.5" />
-            <circle cx={x(hover)} cy={y(data[hover].human)} r="4" fill="#b7d95f" stroke="#fff" strokeWidth="1.5" />
+            <circle
+              cx={x(hover)}
+              cy={y(data[hover].ai)}
+              r="4"
+              fill="#306645"
+              stroke="#fff"
+              strokeWidth="1.5"
+            />
+            <circle
+              cx={x(hover)}
+              cy={y(data[hover].human)}
+              r="4"
+              fill="#b7d95f"
+              stroke="#fff"
+              strokeWidth="1.5"
+            />
             <g transform={`translate(${tooltipX}, ${PAD.top})`}>
               <rect x="-62" y="0" width="124" height="46" rx="8" fill="#ffffff" stroke="#e5e9e3" />
               <text x="-54" y="17" fontSize="10" fill="#8a978f">
@@ -406,14 +528,7 @@ export function VolumeChart({ data }: { data: VolumePoint[] }) {
 
         {data.map((point, i) =>
           i % labelEvery === 0 || i === data.length - 1 ? (
-            <text
-              key={point.date}
-              x={x(i)}
-              y={CHART_H - 8}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#8a978f"
-            >
+            <text key={point.date} x={x(i)} y={CHART_H - 8} textAnchor="middle" fontSize="10" fill="#8a978f">
               {point.label}
             </text>
           ) : null,
@@ -422,10 +537,12 @@ export function VolumeChart({ data }: { data: VolumePoint[] }) {
       <div className="row row-wrap" style={{ justifyContent: 'space-between', marginTop: 6 }}>
         <div className="chart-legend">
           <span className="legend-key">
-            <span className="legend-swatch" style={{ background: '#306645' }} />Answered by Relay
+            <span className="legend-swatch" style={{ background: '#306645' }} />
+            Answered by Relay
           </span>
           <span className="legend-key">
-            <span className="legend-swatch" style={{ background: '#b7d95f' }} />Handled by a human
+            <span className="legend-swatch" style={{ background: '#b7d95f' }} />
+            Handled by a human
           </span>
         </div>
         <span className="note">
@@ -443,7 +560,11 @@ export function VolumeChart({ data }: { data: VolumePoint[] }) {
  * ================================================================== */
 
 export function StatCard({
-  label, value, foot, icon, tone = '',
+  label,
+  value,
+  foot,
+  icon,
+  tone = '',
 }: {
   label: string;
   value: string;
@@ -548,8 +669,13 @@ export function BusinessStoryCard({ stats, days }: { stats: Stats | null; days: 
         <p className="story-narrative">
           {total > 0 ? (
             <>
-              Relay resolved <strong>{stats.aiResolutions} questions ({aiPct}%)</strong> automatically using your store knowledge base.
-              {' '}<strong>{stats.humanHandoffs} conversations</strong> were seamlessly routed to your team with complete conversation history.
+              Relay resolved{' '}
+              <strong>
+                {stats.aiResolutions} questions ({aiPct}%)
+              </strong>{' '}
+              automatically using your store knowledge base.{' '}
+              <strong>{stats.humanHandoffs} conversations</strong> were seamlessly routed to your team with
+              complete conversation history.
             </>
           ) : (
             'Your AI support is active and ready to answer customer questions using your verified store policies.'
@@ -571,7 +697,13 @@ export function BusinessStoryCard({ stats, days }: { stats: Stats | null; days: 
               </span>
             </span>
           </div>
-          <div className="deflection-bar-track" role="progressbar" aria-valuenow={aiPct} aria-valuemin={0} aria-valuemax={100}>
+          <div
+            className="deflection-bar-track"
+            role="progressbar"
+            aria-valuenow={aiPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <div
               className="deflection-bar-fill ai"
               style={{ width: `${aiPct}%` }}
@@ -610,7 +742,9 @@ export function BusinessStoryCard({ stats, days }: { stats: Stats | null; days: 
             <Clock size={16} aria-hidden="true" />
             <span className="kpi-label">Avg First Response</span>
           </div>
-          <div className="kpi-num">{stats.avgResponseSeconds !== null ? formatSeconds(stats.avgResponseSeconds) : '—'}</div>
+          <div className="kpi-num">
+            {stats.avgResponseSeconds !== null ? formatSeconds(stats.avgResponseSeconds) : '—'}
+          </div>
           <div className="kpi-sub">Instant answers for shoppers</div>
         </div>
 
@@ -620,7 +754,9 @@ export function BusinessStoryCard({ stats, days }: { stats: Stats | null; days: 
             <span className="kpi-label">Customer Satisfaction</span>
           </div>
           <div className="kpi-num">{stats.csat !== null ? `${stats.csat}%` : '96%'}</div>
-          <div className="kpi-sub">{stats.ratingCount ? `Based on ${stats.ratingCount} ratings` : 'Positive shopper feedback'}</div>
+          <div className="kpi-sub">
+            {stats.ratingCount ? `Based on ${stats.ratingCount} ratings` : 'Positive shopper feedback'}
+          </div>
         </div>
       </div>
     </section>
@@ -641,14 +777,19 @@ export function IntentBars({ stats }: { stats: Stats | null }) {
           <div key={intent}>
             <div className="bar-head">
               <span className="bar-name">{INTENT_LABEL[intent]}</span>
-              <span className="bar-val">{count} · {pct}%</span>
+              <span className="bar-val">
+                {count} · {pct}%
+              </span>
             </div>
             <div
               className="bar-track"
               role="img"
               aria-label={`${INTENT_LABEL[intent]}: ${count} conversations, ${pct} percent`}
             >
-              <div className={`bar-fill${intent === 'general' ? ' lime' : ''}`} style={{ width: `${pct}%` }} />
+              <div
+                className={`bar-fill${intent === 'general' ? ' lime' : ''}`}
+                style={{ width: `${pct}%` }}
+              />
             </div>
           </div>
         );
@@ -688,15 +829,21 @@ export function MessageBubble({
   const [feedbackSent, setFeedbackSent] = useState(Boolean(message.feedback));
 
   const tone =
-    message.role === 'user' ? 'msg-user'
-      : message.role === 'human' ? 'msg-human'
-        : message.role === 'system' ? 'msg-system'
+    message.role === 'user'
+      ? 'msg-user'
+      : message.role === 'human'
+        ? 'msg-human'
+        : message.role === 'system'
+          ? 'msg-system'
           : 'msg-assistant';
 
   const roleLabel =
-    message.role === 'user' ? 'Customer'
-      : message.role === 'system' ? 'System'
-        : PROVIDER_LABEL[message.provider ?? ''] ?? (message.role === 'human' ? 'Human agent' : 'Relay assistant');
+    message.role === 'user'
+      ? 'Customer'
+      : message.role === 'system'
+        ? 'System'
+        : (PROVIDER_LABEL[message.provider ?? ''] ??
+          (message.role === 'human' ? 'Human agent' : 'Relay assistant'));
 
   const isTool = message.role === 'assistant' && Boolean(message.tool);
   const canShowFeedback = allowFeedback && message.role === 'assistant' && !message.tool;
@@ -739,7 +886,8 @@ export function MessageBubble({
             <div className="feedback-confirmed">
               {currentFeedback?.helpful || (!currentFeedback && feedbackSent && !selectedReason) ? (
                 <span className="badge badge-ok">
-                  <Check size={11} aria-hidden="true" />Helpful answer · Thanks for your feedback
+                  <Check size={11} aria-hidden="true" />
+                  Helpful answer · Thanks for your feedback
                 </span>
               ) : (
                 <span className="badge badge-warn">
@@ -807,11 +955,7 @@ export function MessageBubble({
                 ))}
               </div>
               <div className="row" style={{ gap: 6, marginTop: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs"
-                  onClick={() => setFeedbackOpen(false)}
-                >
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => setFeedbackOpen(false)}>
                   Cancel
                 </button>
                 <button

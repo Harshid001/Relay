@@ -24,6 +24,7 @@ import {
   MAX_TITLE,
   asRecord,
   parseIntent,
+  parsePagination,
   parseTags,
   readOptionalString,
   readRequiredString,
@@ -49,20 +50,22 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps): void {
 
   /* Admin - conversations */
 
-  router.get('/admin/conversations', apiLimiter, deps.requireUser, wrap(async (req, res) => {
-    // Pagination: newest first, bounded page size.
-    const limitRaw = Number(req.query.limit);
-    const offsetRaw = Number(req.query.offset);
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 100;
-    const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
-    const result = await store.listConversations({ limit, offset });
-    res.json({
-      items: result.items,
-      total: result.total,
-      limit,
-      offset,
-    });
-  }));
+  router.get(
+    '/admin/conversations',
+    apiLimiter,
+    deps.requireUser,
+    wrap(async (req, res) => {
+      // Pagination: newest first, bounded page size.
+      const { limit, offset } = parsePagination(req.query, { limit: 100, max: 200 });
+      const result = await store.listConversations({ limit, offset });
+      res.json({
+        items: result.items,
+        total: result.total,
+        limit,
+        offset,
+      });
+    }),
+  );
 
   router.get(
     '/admin/conversations/:id',
@@ -74,39 +77,51 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps): void {
         res.status(404).json({ error: 'Conversation not found' });
         return;
       }
-      res.json({ conversation, messages: await store.getMessages(conversation.id) });
+      // PRD-009: transcripts are bounded (most recent N, chronological).
+      const { limit } = parsePagination(req.query, { limit: 200, max: 500 });
+      res.json({ conversation, messages: await store.getMessages(conversation.id, { limit }) });
     }),
   );
 
-  router.get('/admin/stats', apiLimiter, deps.requireUser, wrap(async (req, res) => {
-    const raw = req.query.days;
-    let days = 7;
-    if (raw !== undefined) {
-      const parsed = Number(raw);
-      if (parsed !== 7 && parsed !== 30) {
-        res.status(400).json({ error: 'days must be 7 or 30' });
-        return;
+  router.get(
+    '/admin/stats',
+    apiLimiter,
+    deps.requireUser,
+    wrap(async (req, res) => {
+      const raw = req.query.days;
+      let days = 7;
+      if (raw !== undefined) {
+        const parsed = Number(raw);
+        if (parsed !== 7 && parsed !== 30) {
+          res.status(400).json({ error: 'days must be 7 or 30' });
+          return;
+        }
+        days = parsed;
       }
-      days = parsed;
-    }
 
-    res.json({ ...(await store.getStats(days)), mode: MODE });
-  }));
+      res.json({ ...(await store.getStats(days)), mode: MODE });
+    }),
+  );
 
   /** Free-plan usage for the current calendar month (admin visibility). */
-  router.get('/admin/usage', apiLimiter, deps.requireUser, wrap(async (_req, res) => {
-    if (usageCache && Date.now() - usageCache.at < USAGE_CACHE_MS) {
-      res.json(usageCache.value);
-      return;
-    }
-    const { start } = currentMonthWindow();
-    const value = await getUsageSummary({
-      conversations: () => store.countConversationsSince(start),
-      aiMessages: () => store.countAssistantMessagesSince(start),
-    });
-    usageCache = { at: Date.now(), value };
-    res.json(value);
-  }));
+  router.get(
+    '/admin/usage',
+    apiLimiter,
+    deps.requireUser,
+    wrap(async (_req, res) => {
+      if (usageCache && Date.now() - usageCache.at < USAGE_CACHE_MS) {
+        res.json(usageCache.value);
+        return;
+      }
+      const { start } = currentMonthWindow();
+      const value = await getUsageSummary({
+        conversations: () => store.countConversationsSince(start),
+        aiMessages: () => store.countAssistantMessagesSince(start),
+      });
+      usageCache = { at: Date.now(), value };
+      res.json(value);
+    }),
+  );
 
   router.post(
     '/admin/conversations/:id/reply',
@@ -202,83 +217,31 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps): void {
 
   /* Admin - FAQs */
 
-  router.post('/admin/faqs', writeLimiter, deps.requireAdminRole, wrap(async (req, res) => {
-    const body = asRecord(req.body);
+  router.post(
+    '/admin/faqs',
+    writeLimiter,
+    deps.requireAdminRole,
+    wrap(async (req, res) => {
+      const body = asRecord(req.body);
 
-    const title = readRequiredString(body.title, MAX_TITLE);
-    if (!title) {
-      res.status(400).json({ error: `title is required and must be at most ${MAX_TITLE} characters` });
-      return;
-    }
-
-    const answer = readRequiredString(body.answer, MAX_ANSWER);
-    if (!answer) {
-      res.status(400).json({ error: `answer is required and must be at most ${MAX_ANSWER} characters` });
-      return;
-    }
-
-    const category = parseIntent(body.category);
-    if (!category) {
-      res.status(400).json({ error: `category must be one of: ${INTENTS.join(', ')}` });
-      return;
-    }
-
-    const tags = parseTags(body.tags);
-    if (!tags) {
-      res.status(400).json({
-        error: `tags must be an array of at most ${MAX_TAGS} strings, each at most ${MAX_TAG_LENGTH} characters`,
-      });
-      return;
-    }
-
-    const created = await store.createFaq({ title, answer, category, tags });
-    clearFaqTermCache();
-    publish({ type: 'faq' });
-    res.status(201).json(created);
-  }));
-
-  router.patch('/admin/faqs/:id', writeLimiter, deps.requireAdminRole, wrap(async (req, res) => {
-    const faqId = req.params.id;
-    if (!(await store.getFaq(faqId))) {
-      res.status(404).json({ error: 'FAQ not found' });
-      return;
-    }
-
-    const body = asRecord(req.body);
-    const applied: Partial<store.FaqInput> = {};
-    let touched = false;
-
-    if (body.title !== undefined) {
       const title = readRequiredString(body.title, MAX_TITLE);
       if (!title) {
-        res.status(400).json({ error: `title must be at most ${MAX_TITLE} characters` });
+        res.status(400).json({ error: `title is required and must be at most ${MAX_TITLE} characters` });
         return;
       }
-      applied.title = title;
-      touched = true;
-    }
 
-    if (body.answer !== undefined) {
       const answer = readRequiredString(body.answer, MAX_ANSWER);
       if (!answer) {
-        res.status(400).json({ error: `answer must be at most ${MAX_ANSWER} characters` });
+        res.status(400).json({ error: `answer is required and must be at most ${MAX_ANSWER} characters` });
         return;
       }
-      applied.answer = answer;
-      touched = true;
-    }
 
-    if (body.category !== undefined) {
       const category = parseIntent(body.category);
       if (!category) {
         res.status(400).json({ error: `category must be one of: ${INTENTS.join(', ')}` });
         return;
       }
-      applied.category = category;
-      touched = true;
-    }
 
-    if (body.tags !== undefined) {
       const tags = parseTags(body.tags);
       if (!tags) {
         res.status(400).json({
@@ -286,35 +249,109 @@ export function registerAdminRoutes(router: Router, deps: AdminDeps): void {
         });
         return;
       }
-      applied.tags = tags;
-      touched = true;
-    }
 
-    if (!touched) {
-      res.status(400).json({ error: 'No updatable fields were provided' });
-      return;
-    }
+      const created = await store.createFaq({ title, answer, category, tags });
+      clearFaqTermCache();
+      publish({ type: 'faq' });
+      res.status(201).json(created);
+    }),
+  );
 
-    const updated = await store.updateFaq(faqId, applied);
-    if (!updated) {
-      res.status(404).json({ error: 'FAQ not found' });
-      return;
-    }
-    clearFaqTermCache();
-    publish({ type: 'faq' });
-    res.json(updated);
-  }));
+  router.patch(
+    '/admin/faqs/:id',
+    writeLimiter,
+    deps.requireAdminRole,
+    wrap(async (req, res) => {
+      const faqId = req.params.id;
+      if (!(await store.getFaq(faqId))) {
+        res.status(404).json({ error: 'FAQ not found' });
+        return;
+      }
 
-  router.get('/admin/knowledge-gaps', apiLimiter, deps.requireUser, wrap(async (_req, res) => {
-    res.json({ items: await store.listKnowledgeGaps() });
-  }));
+      const body = asRecord(req.body);
+      const applied: Partial<store.FaqInput> = {};
+      let touched = false;
 
-  router.post('/admin/knowledge-gaps/:id/resolve', writeLimiter, deps.requireUser, wrap(async (req, res) => {
-    const resolved = await store.resolveKnowledgeGap(req.params.id);
-    if (!resolved) {
-      res.status(404).json({ error: 'Knowledge gap not found' });
-      return;
-    }
-    res.json({ ok: true });
-  }));
+      if (body.title !== undefined) {
+        const title = readRequiredString(body.title, MAX_TITLE);
+        if (!title) {
+          res.status(400).json({ error: `title must be at most ${MAX_TITLE} characters` });
+          return;
+        }
+        applied.title = title;
+        touched = true;
+      }
+
+      if (body.answer !== undefined) {
+        const answer = readRequiredString(body.answer, MAX_ANSWER);
+        if (!answer) {
+          res.status(400).json({ error: `answer must be at most ${MAX_ANSWER} characters` });
+          return;
+        }
+        applied.answer = answer;
+        touched = true;
+      }
+
+      if (body.category !== undefined) {
+        const category = parseIntent(body.category);
+        if (!category) {
+          res.status(400).json({ error: `category must be one of: ${INTENTS.join(', ')}` });
+          return;
+        }
+        applied.category = category;
+        touched = true;
+      }
+
+      if (body.tags !== undefined) {
+        const tags = parseTags(body.tags);
+        if (!tags) {
+          res.status(400).json({
+            error: `tags must be an array of at most ${MAX_TAGS} strings, each at most ${MAX_TAG_LENGTH} characters`,
+          });
+          return;
+        }
+        applied.tags = tags;
+        touched = true;
+      }
+
+      if (!touched) {
+        res.status(400).json({ error: 'No updatable fields were provided' });
+        return;
+      }
+
+      const updated = await store.updateFaq(faqId, applied);
+      if (!updated) {
+        res.status(404).json({ error: 'FAQ not found' });
+        return;
+      }
+      clearFaqTermCache();
+      publish({ type: 'faq' });
+      res.json(updated);
+    }),
+  );
+
+  router.get(
+    '/admin/knowledge-gaps',
+    apiLimiter,
+    deps.requireUser,
+    wrap(async (req, res) => {
+      // PRD-009: previously a hardcoded limit(100) with no paging.
+      const { limit, offset } = parsePagination(req.query, { limit: 100, max: 200 });
+      res.json({ items: await store.listKnowledgeGaps({ limit, offset }), limit, offset });
+    }),
+  );
+
+  router.post(
+    '/admin/knowledge-gaps/:id/resolve',
+    writeLimiter,
+    deps.requireUser,
+    wrap(async (req, res) => {
+      const resolved = await store.resolveKnowledgeGap(req.params.id);
+      if (!resolved) {
+        res.status(404).json({ error: 'Knowledge gap not found' });
+        return;
+      }
+      res.json({ ok: true });
+    }),
+  );
 }

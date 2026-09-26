@@ -33,7 +33,7 @@ npm run build  # Compiles client into frontend/dist
 cd backend
 npm install
 npm run dev    # Starts API server on http://127.0.0.1:3000 with tsx watch
-npm run test   # Runs 37 automated tests
+npm run test   # Runs the 14 unit tests (validation incl. pagination, plan, config, HTTP, monitoring)
 ```
 
 From the root `relay/` folder:
@@ -43,6 +43,16 @@ npm run dev:backend     # Starts backend dev server
 npm run build:frontend  # Builds frontend bundle
 npm run test:backend    # Runs backend tests
 ```
+
+### Local MongoDB & Windows notes
+
+- `docker compose up` starts MongoDB with authentication enforced (fresh
+  volumes). Point out-of-compose backend runs/tests at it with
+  `MONGODB_URI=mongodb://relay:relay-dev-only-change-me@127.0.0.1:27017`
+  (override via `MONGO_USER` / `MONGO_PASSWORD` in `relay/.env`).
+- Line endings are LF in the repo. On Windows leave `core.autocrlf=true`
+  (commits normalize automatically), but run `npm run format` before pushing —
+  CI gates `npm run format:check` and flags CRLF churn.
 
 ### The free plan
 
@@ -75,9 +85,9 @@ docker compose up --build
 
 ### CI
 
-GitHub Actions (`.github/workflows/ci.yml`) lints, typechecks, audits dependencies, builds, and runs the full integration suite plus the Playwright pilot flow (real Chromium against a real server + MongoDB replica set) on every pull request. A separate job builds the production Docker image and smoke-tests its health check; `.github/workflows/backup.yml` runs scheduled MongoDB backups and a monthly restore rehearsal when `BACKUP_ENABLED=true`.
+GitHub Actions (`.github/workflows/ci.yml`) lints, typechecks, audits dependencies, builds, and runs the backend unit suite (14 tests), the frontend unit suite (16 tests), coverage, and the Playwright pilot flow (real Chromium against a real server + MongoDB replica set) on every pull request. A separate job builds the production Docker image and smoke-tests its health check; `.github/workflows/backup.yml` runs scheduled MongoDB backups and a monthly restore rehearsal when `BACKUP_ENABLED=true`.
 
-For development, `npm run dev` runs the backend on 3000 and Vite on 5173. `npm test` runs isolated integration tests; `npm run test:e2e` runs the browser pilot flow (needs MongoDB and `relay/frontend/dist` built); `npm run test:coverage` enforces a coverage floor (line 45% / branch 50% over the in-process modules — the spawned server process is not merged, so raise or lower the floor in `package.json` as it grows); `npm run lint` runs ESLint with zero warnings (`npm run format` applies Prettier); `npm run typecheck` checks frontend and backend; `npm run test:visual` runs the opt-in Playwright screenshot suite (`-- --update-snapshots` generates platform baselines).
+For development, `npm run dev` runs the backend on 3000 and Vite on 5173. `npm test` runs the backend unit tests; `npm run test:e2e` runs the browser pilot flow (needs MongoDB and `relay/frontend/dist` built); `npm run test:coverage` enforces a coverage floor (line 52% / branch 68% over the in-process modules — the spawned server process is not merged, so raise or lower the floor in `package.json` as it grows); `npm run lint` runs ESLint with zero warnings (`npm run format` applies Prettier); `npm run typecheck` checks frontend and backend; `npm run test:visual` runs the opt-in Playwright screenshot suite (`-- --update-snapshots` generates platform baselines).
 
 ## Accounts, sessions and RBAC
 
@@ -91,11 +101,13 @@ For development, `npm run dev` runs the backend on 3000 and Vite on 5173. `npm t
 
 - REST endpoints live under `/api/*` (legacy, unwrapped) and `/api/v1/*` (identical payloads wrapped in `{ success, data | error }` envelopes).
 - Every response carries an `X-Request-Id` header; one structured JSON log line is emitted per request.
-- `GET /api/health` reports process + database status (`503` when Mongo is unreachable); `GET /api/metrics` exposes Prometheus-style counters.
+- `GET /api/health` reports process + database status (`503` when Mongo is unreachable); `GET /api/metrics` (session-authenticated) exposes Prometheus-style counters.
 - `GET /api/admin/usage` returns free-plan usage for the current month.
 - `GET /api/admin/conversations?limit=&offset=` returns `{ items, total, limit, offset }` (default/limit max 100/200).
+- `GET /api/faqs?limit=&offset=`, `GET /api/admin/knowledge-gaps?limit=&offset=` and conversation transcripts (`?limit=`, default 200, max 500) are bounded pages.
+- `POST /api/auth/logout-all` revokes every session for the account; changing your password ends all other sessions automatically.
 - `GET /api/admin/events` is a Server-Sent Events stream (session-authenticated) broadcasting workspace events; the workspace UI subscribes and refreshes instantly, with polling as fallback.
-- `GET /api/openapi.json` serves the OpenAPI 3.1 reference for all 35 paths (also at `/api/v1/openapi.json`, enveloped).
+- `GET /api/openapi.json` serves the OpenAPI 3.1 reference for all 36 paths (also at `/api/v1/openapi.json`, enveloped).
 
 ## Email notifications
 
@@ -157,28 +169,27 @@ Add HTTPS, proper user accounts/SSO and role-based access, audit and retention p
 
 ## Active source
 
-- `src/App.tsx`: thin path router — `/` landing, `/app` workspace, `/chat` customer view.
-- `src/Landing.tsx`: marketing page with the free/self-host story.
-- `src/admin/AdminApp.tsx`: workspace shell, overview, inbox, knowledge, analytics and settings (with usage meters).
-- `src/customer/CustomerCenter.tsx`: customer chat with handoff staging and demo starters.
-- `src/ui/shared.tsx`: shared UI primitives, formatting helpers and chart components.
-- `src/Auth.tsx`: login page, session hook and account card.
-- `src/ErrorBoundary.tsx`: render-error containment for the workspace.
-- `src/service-api.ts`, `src/service-types.ts`: typed client contract and session handling.
-- `server/index.ts`: API, access control, free-plan guards, handoffs and static hosting.
-- `server/plan.ts`: free-tier limits, month window and usage summary.
-- `server/index.ts`: composition root — middleware, router mounts, static/SPA serving and startup.
-- `server/config.ts`: environment config, live-mode guards and the Host/Origin guard.
-- `server/validation.ts`: bounded request-body validators.
-- `server/routes/system.ts`, `routes/customer.ts`, `routes/admin.ts`: the route groups.
-- `server/auth.ts`, `server/auth-routes.ts`: accounts, sessions, RBAC and audit.
-- `server/events.ts`, `server/notify.ts`: realtime event bus (cross-instance via a Mongo change stream, in-process fallback) and email notifications.
-- `server/logger.ts`, `server/http.ts`: structured logging, request IDs, envelopes, metrics.
-- `server/monitoring.ts`: optional error-tracking/alerting webhook.
-- `server/migrations.ts`: versioned migrations + `$jsonSchema` validators.
-- `server/db.ts`: MongoDB repositories, indexes, demo seed and statistics.
-- `server/knowledge.ts`: sample FAQs, ranking and intent rules.
-- `server/orders.ts`: mocked order catalogue backing the lookup tool call.
-- `server/agent.ts`: demo responder and real CodeBuddy adapter.
-- `server/env.ts`: project-local .env loading.
-- `tests/support.test.ts`: reproducible backend tests (run against MongoDB).
+- `frontend/src/App.tsx`: thin path router — `/` landing, `/app` workspace, `/chat` customer view.
+- `frontend/src/Landing.tsx`: marketing page with the free/self-host story.
+- `frontend/src/admin/AdminApp.tsx`: workspace shell, overview, inbox, knowledge, analytics and settings (with usage meters).
+- `frontend/src/customer/CustomerCenter.tsx`: customer chat with handoff staging and demo starters.
+- `frontend/src/ui/shared.tsx`: shared UI primitives, formatting helpers and chart components.
+- `frontend/src/Auth.tsx`: login page, session hook and account card.
+- `frontend/src/ErrorBoundary.tsx`: render-error containment for the workspace.
+- `frontend/src/service-api.ts`, `frontend/src/service-types.ts`: typed client contract and session handling.
+- `backend/server/index.ts`: API, access control, free-plan guards, handoffs and static hosting.
+- `backend/server/plan.ts`: free-tier limits, month window and usage summary.
+- `backend/server/config.ts`: environment config, live-mode guards and the Host/Origin guard.
+- `backend/server/validation.ts`: bounded request-body validators.
+- `backend/server/routes/system.ts`, `routes/customer.ts`, `routes/admin.ts`: the route groups.
+- `backend/server/auth.ts`, `server/auth-routes.ts`: accounts, sessions, RBAC and audit.
+- `backend/server/events.ts`, `server/notify.ts`: realtime event bus (cross-instance via a Mongo change stream, in-process fallback) and email notifications.
+- `backend/server/logger.ts`, `server/http.ts`: structured logging, request IDs, envelopes, metrics.
+- `backend/server/monitoring.ts`: optional error-tracking/alerting webhook.
+- `backend/server/migrations.ts`: versioned migrations + `$jsonSchema` validators.
+- `backend/server/db.ts`: MongoDB repositories, indexes, demo seed and statistics.
+- `backend/server/knowledge.ts`: sample FAQs, ranking and intent rules.
+- `backend/server/orders.ts`: mocked order catalogue backing the lookup tool call.
+- `backend/server/agent.ts`: demo responder and real CodeBuddy adapter.
+- `backend/server/env.ts`: project-local .env loading.
+- `backend/tests/unit.test.ts`: backend unit tests (run without MongoDB).

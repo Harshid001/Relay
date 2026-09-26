@@ -30,8 +30,18 @@ const ErrorSchema = {
 const ConversationSchema = {
   type: 'object',
   required: [
-    'id', 'customer', 'email', 'title', 'intent', 'status', 'assignee', 'rating',
-    'createdAt', 'updatedAt', 'preview', 'escalationReason',
+    'id',
+    'customer',
+    'email',
+    'title',
+    'intent',
+    'status',
+    'assignee',
+    'rating',
+    'createdAt',
+    'updatedAt',
+    'preview',
+    'escalationReason',
   ],
   properties: {
     id: { type: 'string' },
@@ -132,13 +142,15 @@ export const openapi: OpenApiDocument = {
       }),
     },
     '/metrics': {
-      get: op('Prometheus text metrics', ['System'], {
+      get: op('Prometheus text metrics (authenticated)', ['System'], {
         '200': { description: 'relay_requests_total et al (text/plain)' },
+        '401': { description: 'Authentication required', ...jsonRef('Error') },
       }),
     },
     '/health/system': {
-      get: op('Public component health + telemetry snapshot', ['System'], {
+      get: op('Component health + telemetry snapshot (authenticated)', ['System'], {
         '200': { description: 'healthy/degraded/unhealthy per component', ...jsonRef('SystemHealthReport') },
+        '401': { description: 'Authentication required', ...jsonRef('Error') },
         '503': { description: 'Unhealthy', ...jsonRef('SystemHealthReport') },
       }),
     },
@@ -244,10 +256,27 @@ export const openapi: OpenApiDocument = {
       }),
     },
     '/auth/logout': {
-      post: op('Destroy the session server-side (CSRF token required)', ['Auth'], {
-        '200': { description: 'Logged out' },
-        '403': { description: 'Missing/invalid CSRF token', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }] }),
+      post: op(
+        'Destroy the session server-side (CSRF token required)',
+        ['Auth'],
+        {
+          '200': { description: 'Logged out' },
+          '403': { description: 'Missing/invalid CSRF token', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }] },
+      ),
+    },
+    '/auth/logout-all': {
+      post: op(
+        'Revoke every session for the account, including current (CSRF token required)',
+        ['Auth'],
+        {
+          '200': { description: 'Logged out everywhere ({ ok, revoked })' },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '403': { description: 'Missing/invalid CSRF token', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }] },
+      ),
     },
     '/auth/me': {
       get: op('Current session user + CSRF token re-issue', ['Auth'], {
@@ -267,158 +296,255 @@ export const openapi: OpenApiDocument = {
       }),
     },
     '/auth/email/verify': {
-      post: op('Verify code or magic token, create session (single-use)', ['Auth'], {
-        '200': { description: 'User + csrfToken', ...jsonRef('SessionResponse') },
-        '400': { description: 'No code or token', ...jsonRef('Error') },
-        '401': { description: 'Invalid/expired/replayed', ...jsonRef('Error') },
-      }),
+      post: op(
+        'Verify code or magic token, create session (single-use, 20 attempts/10min per IP+email)',
+        ['Auth'],
+        {
+          '200': { description: 'User + csrfToken', ...jsonRef('SessionResponse') },
+          '400': { description: 'No code or token', ...jsonRef('Error') },
+          '401': { description: 'Invalid/expired/replayed', ...jsonRef('Error') },
+          '429': { description: 'Throttled', ...jsonRef('Error') },
+        },
+      ),
     },
     '/auth/google': {
-      post: op('Google ID-token login (aud + email_verified checked)', ['Auth'], {
+      post: op('Google ID-token login (aud + email_verified checked, 30 attempts/10min per IP)', ['Auth'], {
         '200': { description: 'User + csrfToken', ...jsonRef('SessionResponse') },
         '400': { description: 'Missing credential', ...jsonRef('Error') },
         '401': { description: 'Verification failed', ...jsonRef('Error') },
+        '429': { description: 'Throttled', ...jsonRef('Error') },
       }),
     },
     '/auth/users': {
-      get: op('List accounts', ['Auth'], {
-        '200': { description: 'Managed users' },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '403': { description: 'Non-admin', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
-      post: op('Invite an agent/admin (admin only)', ['Auth'], {
-        '201': { description: 'Created user' },
-        '400': { description: 'Bad fields', ...jsonRef('Error') },
-        '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'List accounts',
+        ['Auth'],
+        {
+          '200': { description: 'Managed users' },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '403': { description: 'Non-admin', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
+      post: op(
+        'Invite an agent/admin (admin only)',
+        ['Auth'],
+        {
+          '201': { description: 'Created user' },
+          '400': { description: 'Bad fields', ...jsonRef('Error') },
+          '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/auth/users/{id}/role': {
-      post: op('Change role (admin only, no self-demotion)', ['Auth'], {
-        '200': { description: 'Updated' },
-        '400': { description: 'Self-demotion or bad role', ...jsonRef('Error') },
-        '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      post: op(
+        'Change role (admin only, no self-demotion)',
+        ['Auth'],
+        {
+          '200': { description: 'Updated' },
+          '400': { description: 'Self-demotion or bad role', ...jsonRef('Error') },
+          '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/auth/password': {
-      post: op('Change own password', ['Auth'], {
-        '200': { description: 'Changed' },
-        '401': { description: 'Unauthenticated or wrong current password', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }] }),
+      post: op(
+        'Change own password (ends all other sessions; 10 attempts/10min)',
+        ['Auth'],
+        {
+          '200': { description: 'Changed' },
+          '401': { description: 'Unauthenticated or wrong current password', ...jsonRef('Error') },
+          '429': { description: 'Throttled', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }] },
+      ),
     },
     '/admin/system-health': {
-      get: op('Authed component health + telemetry', ['Admin'], {
-        '200': { description: 'Report', ...jsonRef('SystemHealthReport') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '503': { description: 'Unhealthy', ...jsonRef('SystemHealthReport') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'Authed component health + telemetry',
+        ['Admin'],
+        {
+          '200': { description: 'Report', ...jsonRef('SystemHealthReport') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '503': { description: 'Unhealthy', ...jsonRef('SystemHealthReport') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/events': {
-      get: op('Workspace realtime stream (SSE, text/event-stream)', ['Admin'], {
-        '200': { description: 'Event stream' },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'Workspace realtime stream (SSE, text/event-stream)',
+        ['Admin'],
+        {
+          '200': { description: 'Event stream' },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/conversations': {
-      get: op('List workspace conversations', ['Admin'], {
-        '200': { description: 'Items + total/limit/offset' },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'List workspace conversations',
+        ['Admin'],
+        {
+          '200': { description: 'Items + total/limit/offset' },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/conversations/{id}': {
-      get: op('Full transcript + context for one conversation', ['Admin'], {
-        '200': { description: 'Conversation detail', ...jsonRef('ConversationDetail') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '404': { description: 'Unknown id', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      get: op(
+        'Full transcript + context for one conversation',
+        ['Admin'],
+        {
+          '200': { description: 'Conversation detail', ...jsonRef('ConversationDetail') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '404': { description: 'Unknown id', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/admin/stats': {
-      get: op('Resolution/CSAT/volume statistics (?days=7|30)', ['Admin'], {
-        '200': { description: 'Stats', ...jsonRef('Stats') },
-        '400': { description: 'Bad days value', ...jsonRef('Error') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'Resolution/CSAT/volume statistics (?days=7|30)',
+        ['Admin'],
+        {
+          '200': { description: 'Stats', ...jsonRef('Stats') },
+          '400': { description: 'Bad days value', ...jsonRef('Error') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/usage': {
-      get: op('Free-plan usage for the current month', ['Admin'], {
-        '200': { description: 'Usage', ...jsonRef('Usage') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'Free-plan usage for the current month',
+        ['Admin'],
+        {
+          '200': { description: 'Usage', ...jsonRef('Usage') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/conversations/{id}/reply': {
-      post: op('Human agent reply in context', ['Admin'], {
-        '200': { description: 'Posted message', ...jsonRef('Message') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '403': { description: 'Missing CSRF token (cookie auth)', ...jsonRef('Error') },
-        '404': { description: 'Unknown id', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      post: op(
+        'Human agent reply in context',
+        ['Admin'],
+        {
+          '200': { description: 'Posted message', ...jsonRef('Message') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '403': { description: 'Missing CSRF token (cookie auth)', ...jsonRef('Error') },
+          '404': { description: 'Unknown id', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/admin/conversations/{id}/resolve': {
-      post: op('Resolve a conversation', ['Admin'], {
-        '200': { description: 'Resolved conversation', ...jsonRef('Conversation') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '404': { description: 'Unknown id', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      post: op(
+        'Resolve a conversation',
+        ['Admin'],
+        {
+          '200': { description: 'Resolved conversation', ...jsonRef('Conversation') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '404': { description: 'Unknown id', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/admin/conversations/{id}/assign': {
-      post: op('Assign to an agent', ['Admin'], {
-        '200': { description: 'Assigned conversation', ...jsonRef('Conversation') },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '404': { description: 'Unknown id', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      post: op(
+        'Assign to an agent',
+        ['Admin'],
+        {
+          '200': { description: 'Assigned conversation', ...jsonRef('Conversation') },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '404': { description: 'Unknown id', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/admin/faqs': {
-      post: op('Create a knowledge base article (admin only)', ['Admin'], {
-        '200': { description: 'Created FAQ', ...jsonRef('Faq') },
-        '400': { description: 'Validation error', ...jsonRef('Error') },
-        '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      post: op(
+        'Create a knowledge base article (admin only)',
+        ['Admin'],
+        {
+          '200': { description: 'Created FAQ', ...jsonRef('Faq') },
+          '400': { description: 'Validation error', ...jsonRef('Error') },
+          '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/faqs/{id}': {
-      patch: op('Edit a knowledge base article (admin only)', ['Admin'], {
-        '200': { description: 'Updated FAQ', ...jsonRef('Faq') },
-        '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
-        '404': { description: 'Unknown id', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      patch: op(
+        'Edit a knowledge base article (admin only)',
+        ['Admin'],
+        {
+          '200': { description: 'Updated FAQ', ...jsonRef('Faq') },
+          '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
+          '404': { description: 'Unknown id', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/admin/knowledge-gaps': {
-      get: op('Unanswerable-question backlog', ['Admin'], {
-        '200': { description: 'Open gaps' },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      get: op(
+        'Unanswerable-question backlog',
+        ['Admin'],
+        {
+          '200': { description: 'Open gaps' },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
     '/admin/knowledge-gaps/{id}/resolve': {
-      post: op('Mark a knowledge gap resolved', ['Admin'], {
-        '200': { description: 'Resolved' },
-        '401': { description: 'Unauthenticated', ...jsonRef('Error') },
-        '404': { description: 'Unknown id', ...jsonRef('Error') },
-      }, {
-        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        security: [{ CookieAuth: [] }, { AdminToken: [] }],
-      }),
+      post: op(
+        'Mark a knowledge gap resolved',
+        ['Admin'],
+        {
+          '200': { description: 'Resolved' },
+          '401': { description: 'Unauthenticated', ...jsonRef('Error') },
+          '404': { description: 'Unknown id', ...jsonRef('Error') },
+        },
+        {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          security: [{ CookieAuth: [] }, { AdminToken: [] }],
+        },
+      ),
     },
     '/admin/onboarding/sample-knowledge': {
-      post: op('Load the 15 sample policies on demand (admin only)', ['Admin'], {
-        '200': { description: 'Seeded items' },
-        '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
-      }, { security: [{ CookieAuth: [] }, { AdminToken: [] }] }),
+      post: op(
+        'Load the 15 sample policies on demand (admin only)',
+        ['Admin'],
+        {
+          '200': { description: 'Seeded items' },
+          '403': { description: 'Non-admin or missing CSRF token', ...jsonRef('Error') },
+        },
+        { security: [{ CookieAuth: [] }, { AdminToken: [] }] },
+      ),
     },
   },
   components: {

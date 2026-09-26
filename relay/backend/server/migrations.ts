@@ -135,9 +135,7 @@ async function applyJsonSchemaValidators(db: Db): Promise<void> {
   }
 }
 
-const MIGRATIONS: Migration[] = [
-  { id: '001-json-schema-validators', up: applyJsonSchemaValidators },
-];
+const MIGRATIONS: Migration[] = [{ id: '001-json-schema-validators', up: applyJsonSchemaValidators }];
 
 /** Applies any migrations not yet recorded. Idempotent and safe to re-run. */
 export async function runMigrations(db: Db): Promise<void> {

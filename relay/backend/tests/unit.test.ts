@@ -3,8 +3,21 @@ import assert from 'node:assert/strict';
 
 import { hostAllowed } from '../server/config.js';
 import { envelope, fail, metricsText, ok, wrap } from '../server/http.js';
-import { currentMonthWindow, limitMessage, conversationsLimitReached, aiMessagesLimitReached, getUsageSummary } from '../server/plan.js';
-import { asRecord, parseIntent, parseTags, readOptionalString, readRequiredString } from '../server/validation.js';
+import {
+  currentMonthWindow,
+  limitMessage,
+  conversationsLimitReached,
+  aiMessagesLimitReached,
+  getUsageSummary,
+} from '../server/plan.js';
+import {
+  asRecord,
+  parseIntent,
+  parsePagination,
+  parseTags,
+  readOptionalString,
+  readRequiredString,
+} from '../server/validation.js';
 import { monitoringEnabled } from '../server/monitoring.js';
 
 /* -------------------------------- validation ------------------------------ */
@@ -48,6 +61,20 @@ test('parseTags dedupes, trims, and enforces bounds', () => {
   assert.equal(parseTags('nope'), null);
   assert.equal(parseTags(Array.from({ length: 13 }, (_v, i) => `t${i}`)), null);
   assert.equal(parseTags(['x'.repeat(41)]), null);
+});
+
+test('parsePagination bounds limit/offset and falls back to defaults', () => {
+  assert.deepEqual(parsePagination({ limit: '10', offset: '5' }, { limit: 100, max: 200 }), {
+    limit: 10,
+    offset: 5,
+  });
+  assert.deepEqual(parsePagination({}, { limit: 100, max: 200 }), { limit: 100, offset: 0 });
+  assert.deepEqual(parsePagination({ limit: '9999' }, { limit: 100, max: 200 }), { limit: 200, offset: 0 });
+  assert.deepEqual(parsePagination({ limit: 'abc', offset: '-3' }, { limit: 100, max: 200 }), {
+    limit: 100,
+    offset: 0,
+  });
+  assert.deepEqual(parsePagination({ limit: '0' }, { limit: 100, max: 200 }), { limit: 100, offset: 0 });
 });
 
 /* ----------------------------------- plan --------------------------------- */
@@ -151,10 +178,14 @@ test('wrap forwards async rejections to next', async () => {
     throw boom;
   });
   await new Promise<void>((resolve) => {
-    handler({} as never, {} as never, ((err: unknown) => {
-      received = err;
-      resolve();
-    }) as never);
+    handler(
+      {} as never,
+      {} as never,
+      ((err: unknown) => {
+        received = err;
+        resolve();
+      }) as never,
+    );
   });
   assert.equal(received, boom);
 });
