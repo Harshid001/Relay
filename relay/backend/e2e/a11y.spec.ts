@@ -29,7 +29,12 @@ async function expectNoViolations(page: import('@playwright/test').Page, scope?:
   if (scope) builder.include(scope);
   const results = await builder.analyze();
   expect(
-    results.violations.map((v) => `${v.id} (${v.nodes.length}): ${v.help}`),
+    // Include node targets: a bare rule id never says WHICH element failed,
+    // which once cost a full CI-debug cycle on a transient opacity ramp.
+    results.violations.map(
+      (v) =>
+        `${v.id} (${v.nodes.length}): ${v.help} :: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`,
+    ),
     scope ?? 'page',
   ).toEqual([]);
 }

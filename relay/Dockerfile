@@ -19,7 +19,10 @@ RUN npm run build
 FROM base AS backend-build
 WORKDIR /app/backend
 COPY backend/package.json backend/package-lock.json backend/tsconfig.json backend/tsconfig.build.json ./
-RUN npm ci
+# NOTE: base sets NODE_ENV=production (which makes npm skip devDependencies),
+# but this stage needs typescript — include dev deps explicitly (PRD audit fix:
+# without this, npx resolves the placeholder `tsc` package and the build dies).
+RUN npm ci --include=dev
 COPY backend/server ./server
 RUN npx tsc -p tsconfig.build.json
 
