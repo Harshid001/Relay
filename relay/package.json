@@ -26,5 +26,8 @@
     "esbuild": {
       "allowScripts": "true"
     }
+  },
+  "allowScripts": {
+    "esbuild": "true"
   }
 }
