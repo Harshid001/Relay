@@ -8,9 +8,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: relay
     steps:
       - uses: actions/checkout@v4
 
@@ -18,7 +15,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: relay/package-lock.json
+          cache-dependency-path: |
+            relay/backend/package-lock.json
+            relay/frontend/package-lock.json
 
       - name: Start MongoDB (single-node replica set for transactions)
         run: |
@@ -48,16 +47,24 @@ jobs:
             sleep 2
           done
 
-      - name: Install dependencies
+      - name: Install backend dependencies
+        working-directory: relay/backend
         run: npm ci
 
-      - name: Typecheck
+      - name: Install frontend dependencies
+        working-directory: relay/frontend
+        run: npm ci
+
+      - name: Typecheck backend
+        working-directory: relay/backend
         run: npm run typecheck
 
       - name: Build frontend
+        working-directory: relay/frontend
         run: npm run build
 
       - name: Integration tests (real server + MongoDB)
+        working-directory: relay/backend
         run: npm test
         env:
           MONGODB_URI: mongodb://127.0.0.1:27017
