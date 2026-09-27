@@ -6,8 +6,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-// Loads the compiled backend server instance (compiled via npm run build).
-import app, { ensureReady } from '../dist/server/index.js';
+import app, { ensureReady } from '../server/index.js';
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
