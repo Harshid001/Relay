@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
-  "installCommand": "npm --prefix backend ci --omit=dev && npm --prefix frontend ci",
+  "installCommand": "npm --prefix backend ci && npm --prefix frontend ci",
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.ts": { "maxDuration": 60 }
