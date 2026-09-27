@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [{ "key": "x-config-source", "value": "relay-root-vercel-json" }]
+    }
+  ],
   "buildCommand": "npm run build",
   "installCommand": "npm --prefix backend ci && npm --prefix frontend ci",
   "outputDirectory": "frontend/dist",

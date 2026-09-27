@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [{ "key": "x-config-source", "value": "relay-frontend-vercel-json" }]
+    }
+  ],
   "rewrites": [{ "source": "/:path*", "destination": "/index.html" }]
 }
