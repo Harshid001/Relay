@@ -1,13 +1,6 @@
-/**
- * Vercel serverless entrypoint for standalone backend deployment.
- *
- * Discovered by Vercel in <backend-root>/api/index.ts.
- * Routes /api/* requests to the Express app with memoized warm database initialization.
- */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-// Loads the compiled backend server instance (compiled via npm run build).
-import app, { ensureReady } from '../dist/server/index.js';
+import app, { ensureReady } from '../relay/backend/dist/server/index.js';
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
@@ -19,6 +12,5 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     res.end(JSON.stringify({ error: 'Database unavailable' }));
     return;
   }
-  // Express apps are Node request listeners: (req, res, next) => void.
   (app as unknown as (req: IncomingMessage, res: ServerResponse) => void)(req, res);
 }

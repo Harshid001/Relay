@@ -1,0 +1,10 @@
+{
+  "name": "relay-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix relay run build",
+    "install:all": "npm --prefix relay/backend ci && npm --prefix relay/frontend ci"
+  }
+}

@@ -6,5 +6,5 @@
       "headers": [{ "key": "x-config-source", "value": "relay-frontend-vercel-json" }]
     }
   ],
-  "rewrites": [{ "source": "/:path*", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]
 }
