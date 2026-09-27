@@ -81,7 +81,7 @@ test.describe.serial('pilot flow', () => {
     console.log(`queue test start: url=${page.url()}`);
     await expect(page.getByLabel('Workspace navigation')).toBeVisible({ timeout: 15000 });
     await dismissOverlays();
-    await page.getByRole('button', { name: 'Conversations' }).click();
+    await page.getByRole('button', { name: /Live Inquiries|Conversations/ }).click();
     await page.getByRole('tab', { name: /Needs a human/ }).click();
     await page.locator('tbody tr').first().click();
     // Exact match: the drawer's own close button ("Close conversation
