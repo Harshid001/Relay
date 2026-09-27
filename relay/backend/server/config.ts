@@ -37,6 +37,11 @@ const ALLOWED_HOSTNAMES = new Set([
   'localhost',
   '::1',
   '[::1]',
+  ...(process.env.VERCEL ? ['*.vercel.app'] : []),
+  ...(process.env.VERCEL_URL ? [process.env.VERCEL_URL.toLowerCase()] : []),
+  ...(process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? [process.env.VERCEL_PROJECT_PRODUCTION_URL.toLowerCase()]
+    : []),
   ...(process.env.ALLOWED_HOSTS ?? '')
     .split(',')
     .map((entry) => entry.trim().toLowerCase())
