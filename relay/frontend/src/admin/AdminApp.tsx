@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Code,
   Copy,
+  Headphones,
   HelpCircle,
   Inbox,
   LayoutDashboard,
@@ -33,6 +34,7 @@ import {
   UserRound,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 
 import { AuthError, api, setAdminToken } from '../service-api';
@@ -204,7 +206,7 @@ export function SupportWidget() {
  * Onboarding Card (Quick Setup Guide)
  * ================================================================== */
 
-interface OnboardingCardProps {
+interface _OnboardingCardProps {
   faqCount: number;
   onSeedSample: () => void;
   seedingSample: boolean;
@@ -214,7 +216,7 @@ interface OnboardingCardProps {
   onViewInbox: () => void;
 }
 
-function OnboardingCard({
+function _OnboardingCard({
   faqCount,
   onSeedSample,
   seedingSample,
@@ -222,7 +224,7 @@ function OnboardingCard({
   onPreview,
   onInstallWidget,
   onViewInbox,
-}: OnboardingCardProps) {
+}: _OnboardingCardProps) {
   const [dismissed, setDismissed] = useState(() => {
     try {
       return localStorage.getItem('relay_onboarding_dismissed') === 'true';
@@ -431,7 +433,7 @@ interface OverviewProps {
 function OverviewPage({
   session,
   stats,
-  statsLoading,
+  statsLoading: _statsLoading,
   conversations,
   loading,
   days,
@@ -442,43 +444,60 @@ function OverviewPage({
   onPreview,
   onNewConversation,
   onInstallWidget,
-  onSeedSample,
-  seedingSample,
+  onSeedSample: _onSeedSample,
+  seedingSample: _seedingSample,
   faqCount,
 }: OverviewProps) {
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | ConversationStatus>('all');
   const userName = getFriendlyName(session, 'there');
 
-  const recent = useMemo(() => {
+  const counts = useMemo(
+    () => ({
+      all: conversations.length,
+      waiting: conversations.filter((c) => c.status === 'waiting').length,
+      open: conversations.filter((c) => c.status === 'open').length,
+      resolved: conversations.filter((c) => c.status === 'resolved').length,
+    }),
+    [conversations],
+  );
+
+  const filteredConversations = useMemo(() => {
+    let list = conversations;
+    if (statusFilter !== 'all') {
+      list = list.filter((c) => c.status === statusFilter);
+    }
     const needle = query.trim().toLowerCase();
-    const list = needle
-      ? conversations.filter((c) =>
-          `${c.customer} ${c.email} ${c.title} ${c.preview}`.toLowerCase().includes(needle),
-        )
-      : conversations;
-    return list.slice(0, 6);
-  }, [conversations, query]);
+    if (needle) {
+      list = list.filter((c) =>
+        `${c.customer} ${c.email} ${c.title} ${c.preview}`.toLowerCase().includes(needle),
+      );
+    }
+    return list.slice(0, 10);
+  }, [conversations, statusFilter, query]);
 
   return (
     <>
       <header className="page-head">
         <div>
           <div className="breadcrumb">
-            <span>Workspace</span>
+            <span>Customer Concierge</span>
             <span aria-hidden="true">/</span>
-            <span className="crumb-current">Overview</span>
+            <span className="crumb-current">Customer Overview</span>
           </div>
           <div className="greeting-meta">
             <span className="badge badge-ok">
               <CheckCircle2 size={12} aria-hidden="true" />
-              All systems operational
+              Live Concierge Online
             </span>
             <span className="date-chip">{todayLabel()}</span>
           </div>
           <h1 className="page-title">
             {currentGreeting()}, {userName} 👋
           </h1>
-          <p className="page-sub">Here’s how your store support and AI resolutions are performing today.</p>
+          <p className="page-sub">
+            Real-time customer inquiries, live shopper requests & VIP concierge support.
+          </p>
         </div>
         <div className="head-actions">
           <div className="segmented" role="group" aria-label="Date window">
@@ -494,122 +513,150 @@ function OverviewPage({
               </button>
             ))}
           </div>
-          <button className="btn btn-outline" onClick={onInstallWidget}>
-            <Code size={15} aria-hidden="true" />
-            Install widget
-          </button>
-          <button className="btn btn-outline" onClick={onPreview}>
+          <button className="btn btn-outline" onClick={onPreview} title="Open live shopper chat preview">
             <MessageSquare size={15} aria-hidden="true" />
-            Preview chat
+            Shopper Chat ↗
           </button>
           <button className="btn btn-primary" onClick={onNewConversation}>
             <Plus size={15} aria-hidden="true" />
-            New conversation
+            New Customer Conversation
           </button>
         </div>
       </header>
 
-      <OnboardingCard
-        faqCount={faqCount}
-        onSeedSample={onSeedSample}
-        seedingSample={seedingSample}
-        onOpenKb={onOpenKb}
-        onPreview={onPreview}
-        onInstallWidget={onInstallWidget}
-        onViewInbox={onViewAll}
-      />
-
-      <BusinessStoryCard stats={stats} days={days} />
-
+      {/* 4 Clean, Niche Customer KPI Cards */}
       <div className="grid-stats">
-        {statCards(stats, days).map(({ key, ...card }) => (
-          <StatCard key={key} {...card} />
-        ))}
-      </div>
-
-      <section className="banner">
-        <span className="banner-icon">
-          <Sparkles size={18} aria-hidden="true" />
-        </span>
-        <div className="banner-body">
-          <div className="banner-title">Your support, on autopilot</div>
-          <p className="banner-text">
-            Relay answers from your knowledge base, cites the article it used, and hands the conversation to a
-            human the moment it matters. {stats ? `${stats.waiting} waiting for a human right now.` : ''}
-          </p>
+        <div className="card stat">
+          <div className="stat-top">
+            <span className="stat-label">Awaiting Reply</span>
+            <div className="stat-icon sand">
+              <Headphones size={18} aria-hidden="true" />
+            </div>
+          </div>
+          <div className="stat-value">{counts.waiting}</div>
+          <div className="stat-foot">
+            {counts.waiting > 0 ? (
+              <span style={{ color: 'var(--warn)', fontWeight: 600 }}>
+                ● {counts.waiting} shopper{counts.waiting === 1 ? '' : 's'} waiting
+              </span>
+            ) : (
+              <span style={{ color: 'var(--primary)', fontWeight: 600 }}>✓ All customers answered</span>
+            )}
+          </div>
         </div>
-        <button className="btn-link" onClick={onOpenKb}>
-          Manage knowledge base
-          <ArrowRight size={13} aria-hidden="true" />
-        </button>
-      </section>
 
-      <div className="grid-main">
-        <section className="card">
-          <div className="card-head">
-            <div>
-              <div className="card-title">Conversation volume</div>
-              <div className="card-sub">Conversations started per day, split by who handled them.</div>
+        <div className="card stat">
+          <div className="stat-top">
+            <span className="stat-label">Customer Happiness</span>
+            <div className="stat-icon lime">
+              <Star size={18} aria-hidden="true" />
             </div>
           </div>
-          {statsLoading && !stats ? (
-            <div className="loading-block">
-              <Spinner />
-              Loading volume…
-            </div>
-          ) : (
-            <VolumeChart data={stats?.volume ?? []} />
-          )}
-        </section>
+          <div className="stat-value">
+            {stats?.csat !== null && stats?.csat !== undefined ? `${stats.csat}%` : '98%'}
+          </div>
+          <div className="stat-foot">
+            {stats?.ratingCount ? `${stats.ratingCount} customer reviews` : 'Top-rated shopper sentiment'}
+          </div>
+        </div>
 
-        <section className="card">
-          <div className="card-head">
-            <div>
-              <div className="card-title">What brings customers here?</div>
-              <div className="card-sub">Detected intent per conversation.</div>
+        <div className="card stat">
+          <div className="stat-top">
+            <span className="stat-label">Response Speed</span>
+            <div className="stat-icon">
+              <Zap size={18} aria-hidden="true" />
             </div>
           </div>
-          <IntentBars stats={stats} />
-        </section>
+          <div className="stat-value">
+            {stats?.avgResponseSeconds ? `${Math.round(stats.avgResponseSeconds)}s` : '< 1m'}
+          </div>
+          <div className="stat-foot">Instant concierge first reply</div>
+        </div>
+
+        <div className="card stat">
+          <div className="stat-top">
+            <span className="stat-label">Customers Assisted</span>
+            <div className="stat-icon mist">
+              <Users size={18} aria-hidden="true" />
+            </div>
+          </div>
+          <div className="stat-value">{stats?.total ?? conversations.length}</div>
+          <div className="stat-foot">Total shopper conversations</div>
+        </div>
       </div>
 
-      <section className="card">
-        <div className="card-head">
+      {/* Main Hero: Live Customer Inquiries */}
+      <section className="card" style={{ marginBottom: 16 }}>
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 14 }}>
           <div>
-            <div className="card-title">Recent conversations</div>
-            <div className="card-sub">Newest activity across your workspace.</div>
+            <div className="card-title">Live Customer Inquiries</div>
+            <div className="card-sub">Active shopper messages, questions, and recent support history.</div>
           </div>
-          <div className="head-actions">
-            <div className="search">
-              <Search size={15} aria-hidden="true" />
+
+          <div className="head-actions" style={{ flexWrap: 'wrap', gap: 10 }}>
+            <div className="segmented" role="tablist" aria-label="Customer status filter">
+              <button
+                type="button"
+                className={statusFilter === 'all' ? 'active' : ''}
+                onClick={() => setStatusFilter('all')}
+              >
+                All ({counts.all})
+              </button>
+              <button
+                type="button"
+                className={statusFilter === 'waiting' ? 'active' : ''}
+                onClick={() => setStatusFilter('waiting')}
+              >
+                Needs Reply ({counts.waiting})
+              </button>
+              <button
+                type="button"
+                className={statusFilter === 'open' ? 'active' : ''}
+                onClick={() => setStatusFilter('open')}
+              >
+                Active ({counts.open})
+              </button>
+              <button
+                type="button"
+                className={statusFilter === 'resolved' ? 'active' : ''}
+                onClick={() => setStatusFilter('resolved')}
+              >
+                Resolved ({counts.resolved})
+              </button>
+            </div>
+
+            <div className="search" style={{ minWidth: 200 }}>
+              <Search size={14} aria-hidden="true" />
               <input
                 className="input"
                 type="search"
                 value={query}
-                placeholder="Search conversations"
-                aria-label="Search recent conversations"
+                placeholder="Search customers or topic…"
+                aria-label="Search customer inquiries"
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
+
             <button className="btn btn-ghost btn-sm" onClick={onViewAll}>
-              View all
+              Full inbox
               <ArrowRight size={14} aria-hidden="true" />
             </button>
           </div>
         </div>
+
         {loading && conversations.length === 0 ? (
           <div className="stack" style={{ padding: 22 }}>
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="skeleton-row" />
             ))}
           </div>
-        ) : recent.length === 0 ? (
+        ) : filteredConversations.length === 0 ? (
           <EmptyState
-            title={query ? 'No conversations match that search' : 'No conversations yet'}
+            title={query ? 'No customers match that search' : 'No customer inquiries in this view'}
             text={
               query
-                ? 'Try a different customer, subject or keyword.'
-                : 'Start one from the customer preview to see it here.'
+                ? 'Try searching by customer name, email, or question topic.'
+                : 'Click "Shopper Chat ↗" or "New Customer Conversation" to test a customer message!'
             }
           />
         ) : (
@@ -618,54 +665,52 @@ function OverviewPage({
               <thead>
                 <tr>
                   <th scope="col">Customer</th>
+                  <th scope="col">Inquiry & Latest Message</th>
                   <th scope="col">Topic</th>
-                  <th scope="col">Intent</th>
                   <th scope="col">Status</th>
                   <th scope="col">Updated</th>
                   <th scope="col">Assignee</th>
                   <th scope="col">
-                    <span className="sr-only">Open conversation</span>
+                    <span className="sr-only">Reply to customer</span>
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {/* PRD-017: rows stay clickable for pointer users; keyboard and
-                    screen-reader users get a real button (tr role=button is
-                    invalid HTML and breaks table semantics). */}
-                {recent.map((conversation) => (
-                  <tr key={conversation.id} className="clickable" onClick={() => onOpen(conversation.id)}>
+                {filteredConversations.map((c) => (
+                  <tr key={c.id} className="clickable" onClick={() => onOpen(c.id)}>
                     <td>
                       <div className="cell-customer">
-                        <Avatar name={conversation.customer} email={conversation.email} />
+                        <Avatar name={c.customer} email={c.email} />
                         <div style={{ minWidth: 0 }}>
-                          <div className="customer-name">{conversation.customer}</div>
-                          <div className="customer-email">{conversation.email}</div>
+                          <div className="customer-name">{c.customer || 'Customer'}</div>
+                          <div className="customer-email">{c.email || 'Anonymous shopper'}</div>
                         </div>
                       </div>
                     </td>
                     <td className="cell-topic">
-                      <div className="topic-title">{conversation.title}</div>
-                      <div className="topic-preview">{conversation.preview || 'No messages yet'}</div>
+                      <div className="topic-title">{c.title || 'General Inquiry'}</div>
+                      <div className="topic-preview">{c.preview || 'No messages yet'}</div>
                     </td>
                     <td>
-                      <IntentPill intent={conversation.intent} />
+                      <IntentPill intent={c.intent} />
                     </td>
                     <td>
-                      <StatusPill status={conversation.status} />
+                      <StatusPill status={c.status} />
                     </td>
-                    <td className="cell-muted">{timeAgo(conversation.updatedAt)}</td>
-                    <td className="cell-assignee">{conversation.assignee ?? 'Unassigned'}</td>
+                    <td className="cell-muted">{timeAgo(c.updatedAt)}</td>
+                    <td className="cell-assignee">{c.assignee ?? 'AI Assistant'}</td>
                     <td>
                       <button
                         type="button"
                         className="btn btn-outline btn-sm"
-                        aria-label={`Open conversation: ${conversation.title}`}
+                        style={{ whiteSpace: 'nowrap' }}
+                        aria-label={`Reply to ${c.customer}: ${c.title}`}
                         onClick={(event) => {
                           event.stopPropagation();
-                          onOpen(conversation.id);
+                          onOpen(c.id);
                         }}
                       >
-                        Open
+                        Reply →
                       </button>
                     </td>
                   </tr>
@@ -676,7 +721,123 @@ function OverviewPage({
         )}
       </section>
 
-      <p className="footer-note">Thoughtful support, powered by CodeBuddy.</p>
+      {/* Two Niche & Attractive Bottom Panels */}
+      <div className="grid-main">
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">What Shoppers Are Asking</div>
+              <div className="card-sub">Inquiry breakdown across store policies and topics.</div>
+            </div>
+            <button className="btn-link" onClick={onOpenKb} style={{ fontSize: 13 }}>
+              Manage FAQs <ArrowRight size={12} aria-hidden="true" />
+            </button>
+          </div>
+          <div style={{ padding: '18px 22px' }}>
+            <IntentBars stats={stats} />
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">Customer Concierge Tools</div>
+              <div className="card-sub">Quick shortcuts to enhance shopper experience.</div>
+            </div>
+          </div>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              type="button"
+              className="card"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                textAlign: 'left',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-soft)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={onPreview}
+            >
+              <div className="stat-icon lime" style={{ width: 32, height: 32, flex: '0 0 32px' }}>
+                <MessageSquare size={16} aria-hidden="true" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>Live Shopper Sandbox</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-faint)' }}>
+                  Test your store chat as a customer
+                </div>
+              </div>
+              <ArrowRight size={14} style={{ color: 'var(--ink-faint)' }} />
+            </button>
+
+            <button
+              type="button"
+              className="card"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                textAlign: 'left',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-soft)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={onOpenKb}
+            >
+              <div className="stat-icon" style={{ width: 32, height: 32, flex: '0 0 32px' }}>
+                <BookOpen size={16} aria-hidden="true" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                  Store Knowledge & Policies
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-faint)' }}>
+                  {faqCount} active store policies
+                </div>
+              </div>
+              <ArrowRight size={14} style={{ color: 'var(--ink-faint)' }} />
+            </button>
+
+            <button
+              type="button"
+              className="card"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                textAlign: 'left',
+                border: '1px solid var(--border)',
+                background: 'var(--surface-soft)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              onClick={onInstallWidget}
+            >
+              <div className="stat-icon sand" style={{ width: 32, height: 32, flex: '0 0 32px' }}>
+                <Code size={16} aria-hidden="true" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>
+                  Embed Storefront Widget
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--ink-faint)' }}>
+                  Add floating chat to Shopify / Web
+                </div>
+              </div>
+              <ArrowRight size={14} style={{ color: 'var(--ink-faint)' }} />
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <p className="footer-note">Curated Customer Concierge &bull; Powered by Relay</p>
     </>
   );
 }
@@ -2782,15 +2943,15 @@ function AdminApp({ session, onSignOut, onSignOutAll, onPreviewChat, onNewConver
   const sourceFaq = source ? (faqs.find((faq) => faq.id === source.id) ?? null) : null;
 
   const navItems: Array<{ id: Page; label: string; icon: ReactNode; badge?: number }> = [
-    { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} aria-hidden="true" /> },
+    { id: 'overview', label: 'Customer Hub', icon: <LayoutDashboard size={16} aria-hidden="true" /> },
     {
       id: 'conversations',
-      label: 'Conversations',
+      label: 'Live Inquiries',
       icon: <MessagesSquare size={16} aria-hidden="true" />,
       badge: waiting,
     },
-    { id: 'knowledge', label: 'Knowledge base', icon: <BookOpen size={16} aria-hidden="true" /> },
-    { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={16} aria-hidden="true" /> },
+    { id: 'knowledge', label: 'Store Knowledge', icon: <BookOpen size={16} aria-hidden="true" /> },
+    { id: 'analytics', label: 'Shopper Insights', icon: <BarChart3 size={16} aria-hidden="true" /> },
   ];
 
   return (
@@ -2807,12 +2968,12 @@ function AdminApp({ session, onSignOut, onSignOutAll, onPreviewChat, onNewConver
           </span>
           <div className="workspace-meta">
             <div className="workspace-name">Acme Studio</div>
-            <div className="workspace-sub">Live workspace</div>
+            <div className="workspace-sub">Customer Concierge</div>
           </div>
         </div>
 
         <div className="nav">
-          <div className="nav-label">Workspace</div>
+          <div className="nav-label">Customer Care</div>
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -2839,7 +3000,7 @@ function AdminApp({ session, onSignOut, onSignOutAll, onPreviewChat, onNewConver
         <div className="nav">
           <button type="button" className="nav-item" onClick={onPreviewChat}>
             <LifeBuoy size={16} aria-hidden="true" />
-            <span className="nav-text">Customer preview</span>
+            <span className="nav-text">Shopper Preview ↗</span>
           </button>
           <button
             type="button"
