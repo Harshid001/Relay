@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Relay API Server</title>
+    <meta
+      name="description"
+      content="Relay Customer Support Backend API Service running on Vercel Serverless"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #090d16;
+        --card-bg: rgba(17, 24, 39, 0.75);
+        --card-border: rgba(255, 255, 255, 0.08);
+        --text-main: #f3f4f6;
+        --text-muted: #9ca3af;
+        --primary: #3b82f6;
+        --primary-hover: #2563eb;
+        --accent: #10b981;
+        --code-bg: rgba(0, 0, 0, 0.4);
+        --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        --font-mono: 'JetBrains Mono', monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background-color: var(--bg);
+        background-image:
+          radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+          radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.1) 0px, transparent 50%);
+        background-attachment: fixed;
+        color: var(--text-main);
+        font-family: var(--font-sans);
+        line-height: 1.6;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+      }
+
+      .container {
+        width: 100%;
+        max-width: 720px;
+      }
+
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border-radius: 16px;
+        padding: 2.5rem;
+        box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
+        margin-bottom: 1.5rem;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--card-border);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .brand-logo {
+        width: 42px;
+        height: 42px;
+        background: linear-gradient(135deg, #3b82f6, #6366f1);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-weight: 700;
+        font-size: 1.25rem;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+      }
+
+      .brand-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        letter-spacing: -0.025em;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.35rem 0.85rem;
+        border-radius: 9999px;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        background: rgba(16, 185, 129, 0.12);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.25);
+      }
+
+      .badge-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background-color: #10b981;
+        box-shadow: 0 0 8px #10b981;
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.5;
+          transform: scale(0.85);
+        }
+      }
+
+      .description {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        margin-bottom: 2rem;
+      }
+
+      .section-title {
+        font-size: 0.875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+        font-weight: 600;
+      }
+
+      .endpoint-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 2rem;
+      }
+
+      .endpoint-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.875rem 1rem;
+        background: var(--code-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 8px;
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+      }
+
+      .endpoint-item:hover {
+        border-color: rgba(255, 255, 255, 0.15);
+        background: rgba(0, 0, 0, 0.55);
+      }
+
+      .endpoint-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .method {
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        letter-spacing: 0.05em;
+      }
+
+      .method-get {
+        background: rgba(59, 130, 246, 0.15);
+        color: #60a5fa;
+        border: 1px solid rgba(59, 130, 246, 0.3);
+      }
+
+      .method-post {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+      }
+
+      .endpoint-path {
+        color: #e5e7eb;
+      }
+
+      .endpoint-link {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.8125rem;
+        font-family: var(--font-sans);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        transition: color 0.15s ease;
+      }
+
+      .endpoint-link:hover {
+        color: var(--primary);
+      }
+
+      .test-box {
+        margin-top: 1.5rem;
+        padding: 1.25rem;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 8px;
+        border: 1px solid var(--card-border);
+      }
+
+      .test-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+      }
+
+      .btn {
+        background: var(--primary);
+        color: #fff;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        font-weight: 500;
+        font-size: 0.875rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: background 0.15s ease;
+      }
+
+      .btn:hover {
+        background: var(--primary-hover);
+      }
+
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      pre#output {
+        background: #05070c;
+        padding: 0.875rem 1rem;
+        border-radius: 6px;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        color: #a7f3d0;
+        overflow-x: auto;
+        min-height: 48px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      footer {
+        text-align: center;
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <div class="header">
+          <div class="brand">
+            <div class="brand-logo">R</div>
+            <div class="brand-title">Relay API</div>
+          </div>
+          <div class="badge">
+            <span class="badge-dot"></span>
+            <span>Online</span>
+          </div>
+        </div>
+
+        <p class="description">Relay Customer Support Backend API service running in serverless mode.</p>
+
+        <div class="section-title">Core Endpoints</div>
+        <ul class="endpoint-list">
+          <li class="endpoint-item">
+            <div class="endpoint-left">
+              <span class="method method-get">GET</span>
+              <span class="endpoint-path">/api/health</span>
+            </div>
+            <a class="endpoint-link" href="/api/health" target="_blank" rel="noopener">Open &rarr;</a>
+          </li>
+          <li class="endpoint-item">
+            <div class="endpoint-left">
+              <span class="method method-get">GET</span>
+              <span class="endpoint-path">/api/openapi.json</span>
+            </div>
+            <a class="endpoint-link" href="/api/openapi.json" target="_blank" rel="noopener">Open &rarr;</a>
+          </li>
+          <li class="endpoint-item">
+            <div class="endpoint-left">
+              <span class="method method-get">GET</span>
+              <span class="endpoint-path">/api/v1/customer/faqs</span>
+            </div>
+            <a class="endpoint-link" href="/api/v1/customer/faqs" target="_blank" rel="noopener"
+              >Open &rarr;</a
+            >
+          </li>
+          <li class="endpoint-item">
+            <div class="endpoint-left">
+              <span class="method method-post">POST</span>
+              <span class="endpoint-path">/api/v1/customer/conversations</span>
+            </div>
+            <span class="endpoint-link" style="color: var(--text-muted)">Session required</span>
+          </li>
+        </ul>
+
+        <div class="test-box">
+          <div class="test-header">
+            <span style="font-size: 0.875rem; font-weight: 500">Live Health Probe</span>
+            <button id="pingBtn" class="btn" onclick="testHealth()">Ping /api/health</button>
+          </div>
+          <pre id="output">Click "Ping /api/health" to test the serverless endpoint.</pre>
+        </div>
+      </div>
+
+      <footer>Relay &bull; Serverless Express API on Vercel</footer>
+    </div>
+
+    <script>
+      async function testHealth() {
+        const btn = document.getElementById('pingBtn');
+        const out = document.getElementById('output');
+        btn.disabled = true;
+        btn.textContent = 'Pinging...';
+        out.textContent = 'Requesting GET /api/health ...';
+        try {
+          const res = await fetch('/api/health');
+          const data = await res.json();
+          out.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+          out.textContent = 'Error calling /api/health: ' + err.message;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Ping /api/health';
+        }
+      }
+    </script>
+  </body>
+</html>
